@@ -25,3 +25,9 @@ turnserver-stdout.log
 
 # Backup
 *.bak
+
+# Cursor AI personal reference docs (local only, keep the README placeholder)
+docs/cursor/*
+!docs/cursor/README.md
+
+CLAUDE.md
