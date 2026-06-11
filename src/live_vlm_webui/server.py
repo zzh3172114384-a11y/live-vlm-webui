@@ -213,7 +213,9 @@ async def detect_local_service_and_model():
 
 async def index(request):
     """Serve the main HTML page"""
-    content = open(os.path.join(os.path.dirname(__file__), "static", "index.html"), "r").read()
+    content = open(
+        os.path.join(os.path.dirname(__file__), "static", "index.html"), "r", encoding="utf-8"
+    ).read()
     return web.Response(content_type="text/html", text=content)
 
 
@@ -230,8 +232,13 @@ async def models(request):
 
             temp_client = AsyncOpenAI(base_url=api_base, api_key=api_key if api_key else "EMPTY")
             models_response = await temp_client.models.list()
+            # Mark the session's configured (.env) model as current. Otherwise the
+            # frontend sees no current model, auto-selects the first one in the list
+            # (e.g. a text-only model), and silently pushes it back via update_model,
+            # overriding the .env default and causing 404 "function not found".
+            current_model = get_or_create_session("default")["vlm_service"].model
             models_list = [
-                {"id": model.id, "name": model.id, "current": False}
+                {"id": model.id, "name": model.id, "current": model.id == current_model}
                 for model in models_response.data
             ]
             return web.Response(
@@ -1034,6 +1041,17 @@ def main():
     import ssl
     from . import __version__
 
+    # Load configuration from a .env file (current dir / project root) if present.
+    # Precedence: command-line args > environment / .env > built-in defaults.
+    try:
+        from dotenv import load_dotenv, find_dotenv
+
+        # 先从当前工作目录向上找 .env（用户通常在项目根运行），
+        # 兜底用模块上溯路径（editable 安装时也能到项目根）。
+        load_dotenv(find_dotenv(usecwd=True) or None)
+    except ImportError:
+        logger.debug("python-dotenv not installed; skipping .env loading")
+
     parser = argparse.ArgumentParser(
         description="WebRTC Live VLM WebUI - Real-time vision model interaction",
         epilog="Examples:\n"
@@ -1048,8 +1066,17 @@ def main():
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=8090, help="Port to bind to (default: 8090)")
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("LIVE_VLM_HOST", "0.0.0.0"),
+        help="Host to bind to (default: 0.0.0.0, env: LIVE_VLM_HOST)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("LIVE_VLM_PORT") or 8090),
+        help="Port to bind to (default: 8090, env: LIVE_VLM_PORT)",
+    )
     parser.add_argument(
         "--auto-port",
         action="store_true",
@@ -1063,8 +1090,9 @@ def main():
     )
     parser.add_argument(
         "--api-key",
-        default="EMPTY",
-        help="API key - use 'EMPTY' for local servers, required for NVIDIA NGC/OpenAI (default: EMPTY)",
+        default=os.environ.get("LIVE_VLM_API_KEY", "EMPTY"),
+        help="API key - use 'EMPTY' for local servers, required for NVIDIA NGC/OpenAI "
+        "(default: EMPTY, env: LIVE_VLM_API_KEY)",
     )
     parser.add_argument(
         "--prompt",
@@ -1084,13 +1112,15 @@ def main():
     )
     parser.add_argument(
         "--ssl-cert",
-        default=None,  # Will be set to config dir if not specified
-        help=f"Path to SSL certificate file (default: {default_cert_path}, auto-generated if missing)",
+        default=os.environ.get("LIVE_VLM_SSL_CERT"),  # None -> config dir (set below)
+        help=f"Path to SSL certificate file (default: {default_cert_path}, "
+        "env: LIVE_VLM_SSL_CERT, auto-generated if missing)",
     )
     parser.add_argument(
         "--ssl-key",
-        default=None,  # Will be set to config dir if not specified
-        help=f"Path to SSL private key file (default: {default_key_path}, auto-generated if missing)",
+        default=os.environ.get("LIVE_VLM_SSL_KEY"),  # None -> config dir (set below)
+        help=f"Path to SSL private key file (default: {default_key_path}, "
+        "env: LIVE_VLM_SSL_KEY, auto-generated if missing)",
     )
     parser.add_argument(
         "--no-ssl",
