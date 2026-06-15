@@ -244,7 +244,7 @@ Then watch: `test-results/videos/test_name.webm`
 def test_page_loads(page):
     try:
         page.goto("http://localhost:8080")
-        assert page.is_visible("video")
+        assert page.is_visible("#videoElement")
     except AssertionError:
         page.screenshot(path="test-results/failure.png")
         raise

@@ -393,13 +393,16 @@ def test_full_video_analysis_workflow(page, check_requirements):
 
     # Wait for video element to be present and playing
     print("   ⏳ Waiting for video stream to initialize...")
-    video_element = page.locator("video").first
+    # NOTE: video now renders as an <img id="videoElement"> MJPEG stream (WebRTC removed).
+    # This e2e test still drives the legacy "open camera" flow and needs a fuller rewrite
+    # for the RTSP/MJPEG source flow; the selector below is updated to the current element.
+    video_element = page.locator("#videoElement").first
     assert video_element.is_visible(timeout=15000), "Video element not visible after 15s"
     print("   ✅ Video element visible")
 
-    # Wait for video to actually start streaming and camera to initialize
+    # Wait for video to actually start streaming and page to expand
     print("   ⏳ Waiting for video stream to fully expand page layout...")
-    time.sleep(5)  # Give more time for WebRTC to start and page to expand
+    time.sleep(5)  # Give time for the MJPEG stream to start and page to expand
 
     # Find and check ALL scrollable elements on the page
     scrollable_elements = page.evaluate("""
@@ -887,7 +890,7 @@ def test_full_video_analysis_workflow(page, check_requirements):
     print(f"   📸 Screenshot saved: {screenshot_path}")
 
     # Final assertion: Page should still be responsive
-    assert page.is_visible("video"), "Video element disappeared during test"
+    assert page.is_visible("#videoElement"), "Video element disappeared during test"
 
     # Get the recorded video path
     video_path = page.video.path() if page.video else None
