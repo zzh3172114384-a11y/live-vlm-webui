@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 OmniSight Contributors.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +15,7 @@
 # limitations under the License.
 
 """
-WebRTC Live VLM WebUI Server
+OmniSight Server
 Main server that handles WebRTC connections and serves the web interface
 """
 
@@ -1053,7 +1054,7 @@ def main():
         logger.debug("python-dotenv not installed; skipping .env loading")
 
     parser = argparse.ArgumentParser(
-        description="WebRTC Live VLM WebUI - Real-time vision model interaction",
+        description="OmniSight - Real-time multi-camera VLM monitoring wall",
         epilog="Examples:\n"
         "  vLLM:    python server.py --model llama-3.2-11b-vision-instruct --api-base http://localhost:8000/v1\n"
         "  SGLang:  python server.py --model llama-3.2-11b-vision-instruct --api-base http://localhost:30000/v1\n"
@@ -1334,7 +1335,7 @@ def stop():
         logger.error("Install it with: pip install live-vlm-webui[dev]")
         sys.exit(1)
 
-    print("Stopping Live VLM WebUI server...")
+    print("Stopping OmniSight server...")
 
     # Find and kill processes running live_vlm_webui.server
     found = False

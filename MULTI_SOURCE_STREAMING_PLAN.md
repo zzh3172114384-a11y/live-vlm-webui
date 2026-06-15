@@ -1,7 +1,7 @@
 # 多源 · 稳定传输 · 实时更新 · 检测框叠加 改造方案
 
 > **适用版本**：基于 `live-vlm-webui` 0.4.0
-> **更新**：2026-06-11 —— 补入"已落地的运行基线"与"现有边缘设备实测"，据实修订检测框落地策略（新增「框已烧进像素」现实模式），并新增 §5.8 视频编码/压缩选型（结论：当前 MJPEG 即可，Orin NX 上换 H.264 不划算）。
+> **更新**：2026-06-11 —— 补入"已落地的运行基线"与"现有边缘设备实测"，据实修订检测框落地策略（新增「框已烧进像素」现实模式），新增 §5.8 视频编码/压缩选型（结论：当前 MJPEG 即可，Orin NX 上换 H.264 不划算），并新增 §10 界面品牌化（去 NVIDIA → 项目名 **OmniSight / 全视**）。
 
 ---
 
@@ -392,3 +392,55 @@ cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75, cv2.IMWRITE_JPEG_OPTIMI
 - [ ] **检测框与画面帧级对齐**：画面中运动目标的框无明显滞后/漂移（同 `frame_id` 配对生效）。
 - [ ] **框坐标归一化**：浏览器窗口缩放、预览分辨率变化时框位置仍准确。
 - [ ] **检测通道断流降级**：元数据断开时前端停止叠旧框并标记「检测离线」，不冻结错误框。
+
+---
+
+## 10. 界面品牌化（去 NVIDIA 信息 → 本项目）
+
+> 目标：页面首屏不再以 NVIDIA 作为"产品身份"，改为本项目品牌。**注意区分三类信息，处理方式完全不同**——尤其开源许可署名（C 类）涉及法律，**不能删除**。
+
+### 10.1 项目命名
+
+| 项 | 取值 |
+|----|------|
+| 项目名（英文） | **OmniSight** |
+| 中文名 | **全视** |
+| 定位语（副标题用） | 局域网多路视觉智能监控墙 · Real-time Multi-Camera VLM Monitoring Wall |
+| 仓库/包名建议 | `omnisight`（Python 包 `live_vlm_webui` → `omnisight` 的重命名是独立重构，可后置，不阻塞 UI 改名） |
+
+> 备选名（如不满意可整体替换）：`VisionWall`（视界墙）/ `SentinelVLM`（哨视）。改名只需改下表 A 类文案，不触碰功能与许可。
+
+### 10.2 三类 NVIDIA 信息，分别处理
+
+| 类别 | 含义 | 处理 |
+|------|------|------|
+| **A. UI 品牌文案/视觉** | 标题、H1、副标题、favicon/logo、品牌配色注释 | ✅ **改为 OmniSight 品牌** |
+| **B. 后端功能引用** | "NVIDIA API Catalog" 作为一个**可选 VLM 后端**、GPU 检测、API 预设 | 🔧 **功能保留**，但措辞中性化、不作为首屏品牌（面板本已隐藏，优先级低） |
+| **C. 开源许可署名** | 各源文件头部 `SPDX Copyright (c) 2025 NVIDIA CORPORATION` + Apache-2.0 | ⛔ **必须保留**（法律要求），只能在其旁**追加**本项目版权，**不可删除/替换** |
+
+> ⚠️ **C 类是硬约束**：本项目基于 Apache-2.0 上游，许可证第 4 条要求保留原始版权声明与 NOTICE。去品牌化 **只动 UI 展示层（A）**，源码头部的 NVIDIA 版权行**原样保留**；可在其下另起一行加 `SPDX-FileCopyrightText: Copyright (c) 2026 OmniSight Contributors`。把"页面不显示 NVIDIA"误解成"删掉源码版权头"会违反许可。
+
+### 10.3 A 类改动清单（前端品牌，`static/index.html`）
+
+| 位置 | 现状 | 改为 |
+|------|------|------|
+| `:22` `<title>` | `Live VLM WebUI - NVIDIA AI Platform` | `OmniSight 全视 · 视觉监控墙` |
+| `:2010` `<h1>` | `Live VLM WebUI` | `OmniSight` |
+| `:2011` 副标题 | `Real-time Vision Language Model Benchmark/Evaluation Tool` | `局域网多路视觉智能监控墙` |
+| `:33-38,1691,1717,1968,2001` | 注释写 *NVIDIA Green / NVIDIA style* 的品牌色 | 配色可**沿用**（绿色不归属任何商标），把注释改为"主题绿/Accent"即可；如要彻底区分可换主题色变量 |
+| favicon / 顶部 logo | NVIDIA 绿叶图标 | 换本项目 favicon/logo（`static/favicon/`、`static/images/`），临时可用纯文字/通用图标 |
+| `:2319` RTSP 提示里的外链 | 链到 `github.com/NVIDIA-AI-IOT/live-vlm-webui` 文档 | 改指向本项目文档，或暂时去掉该链接 |
+
+### 10.4 B 类中性化（功能保留，可选/低优先）
+
+- `index.html:2217-2219`、`:2235`、`:3310-3311`：把面向用户的 *"NVIDIA API Catalog"* 提示改成中性词（如"云端 VLM 后端"）。**功能不动**——NVIDIA API 仍是受支持的后端之一，只是不作为品牌出现。当前 VLM 配置面板已隐藏（§0），此项几乎不可见，**可最后再做**。
+- `index.html:3781-3782`：按 GPU 名显示 NVIDIA 芯片图——**纯功能性 GPU 检测，保留**。
+- `server.py:17,1056,1337` 日志/CLI 文案里的 *"Live VLM WebUI"*：改成 `OmniSight`（纯字符串，无功能影响）。
+- `server.py:306-311,1172-1185`：NVIDIA API Catalog 的**自动回退逻辑保留**（它是没有本地 VLM 时的兜底后端），日志措辞可中性化。
+
+### 10.5 验收
+
+- [ ] 首屏 `<title>` / H1 / 副标题 / favicon 均为 OmniSight 品牌，无 "NVIDIA AI Platform" 字样。
+- [ ] 源码各文件头部 NVIDIA 版权 + Apache-2.0 SPDX 行**完整保留**（`git grep -c "NVIDIA CORPORATION" src/` 不减少），仅在其旁追加本项目版权。
+- [ ] NVIDIA API 作为后端**仍可正常工作**（去品牌 ≠ 去功能）。
+- [ ] 面向用户的 "NVIDIA API Catalog" 字样已中性化或随隐藏面板不可见。
