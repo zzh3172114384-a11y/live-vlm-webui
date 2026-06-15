@@ -2560,109 +2560,17 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
         const maxLatency = document.getElementById('maxLatency');
         const mirrorBtn = document.getElementById('mirrorBtn');
 
-        let peerConnection = null;
-        let localStream = null;
         let websocket = null;
         let fadeTimeout = null;
         let lastText = '';
         // Multi-session: one ID per page/tab; sent in WebSocket and /offer so this tab gets only its VLM output
         const sessionId = crypto.randomUUID ? crypto.randomUUID() : 'tab-' + Date.now() + '-' + Math.random().toString(36).slice(2);
         let isAnalysisRunning = false;
-        let selectedCameraId = null;
         let rtspSessionId = 'default';  // For RTSP mode
         // Enable markdown by default (user can disable if they prefer raw text)
         let markdownEnabled = localStorage.getItem('markdownEnabled') !== 'false';
 
-        // Enumerate and list available cameras
-        async function enumerateCameras() {
-            try {
-                // Request permission first to get device labels
-                const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                tempStream.getTracks().forEach(track => track.stop());
-
-                // Now enumerate with labels
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const videoDevices = devices.filter(device => device.kind === 'videoinput');
-
-                const cameraSelect = document.getElementById('cameraSelect');
-                cameraSelect.innerHTML = '';
-
-                if (videoDevices.length === 0) {
-                    cameraSelect.innerHTML = '<option value="">No cameras found</option>';
-                    return;
-                }
-
-                videoDevices.forEach((device, index) => {
-                    const option = document.createElement('option');
-                    option.value = device.deviceId;
-                    option.text = device.label || `Camera ${index + 1}`;
-                    cameraSelect.appendChild(option);
-                });
-
-                // Select first camera by default
-                selectedCameraId = videoDevices[0].deviceId;
-                console.log(`Found ${videoDevices.length} camera(s)`);
-            } catch (err) {
-                console.error('Error enumerating cameras:', err);
-                document.getElementById('cameraSelect').innerHTML = '<option value="">Error detecting cameras</option>';
-            }
-        }
-
-        // Handle camera selection change
-        document.getElementById('cameraSelect').addEventListener('change', async (e) => {
-            selectedCameraId = e.target.value;
-            console.log('Selected camera:', selectedCameraId);
-
-            // If already running, switch camera
-            if (isAnalysisRunning && localStream) {
-                try {
-                    // Stop current stream
-                    localStream.getTracks().forEach(track => track.stop());
-
-                    // Get new stream with selected camera
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                            deviceId: { exact: selectedCameraId },
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                        }
-                    });
-
-                    // Update video element
-                    videoElement.srcObject = localStream;
-
-                    // Replace track in peer connection
-                    const videoTrack = localStream.getVideoTracks()[0];
-                    const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
-                    if (sender) {
-                        await sender.replaceTrack(videoTrack);
-                        console.log('Camera switched successfully');
-                    }
-                } catch (err) {
-                    console.error('Error switching camera:', err);
-                    alert('Failed to switch camera: ' + err.message);
-                }
-            }
-
-            // Trigger flash animation
-            const cameraSelect = document.getElementById('cameraSelect');
-            cameraSelect.classList.add('applied');
-            setTimeout(() => {
-                cameraSelect.classList.remove('applied');
-            }, 600);
-        });
-
-        // Also trigger flash on blur (when dropdown closes)
-        document.getElementById('cameraSelect').addEventListener('blur', () => {
-            const cameraSelect = document.getElementById('cameraSelect');
-            if (cameraSelect.value) {
-                // Trigger flash animation
-                cameraSelect.classList.add('applied');
-                setTimeout(() => {
-                    cameraSelect.classList.remove('applied');
-                }, 600);
-            }
-        });
+        // Browser webcam source removed (D-4): camera enumeration / selection deleted.
 
         // Tooltip positioning (for fixed position tooltips)
         document.querySelectorAll('.tooltip-wrapper').forEach(wrapper => {
@@ -2954,8 +2862,6 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
             }
         }
 
-        // Browser webcam source dropped (D-4) — skip camera enumeration (no getUserMedia prompt)
-        // enumerateCameras();
 
         // Theme management: Honor OS preference with manual override support
         function applyTheme(theme) {
@@ -4151,103 +4057,8 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
             // Show small stop button
             document.getElementById('smallStopBtn').classList.add('show');
 
-            const activeTab = document.querySelector('.input-source-tab.active');
-            const inputSource = activeTab ? activeTab.getAttribute('data-source') : 'rtsp';
-
-            if (inputSource === 'webcam') {
-                await startWebcam();
-            } else if (inputSource === 'rtsp') {
-                await startRTSP();
-            }
-        }
-
-        // Start WebRTC (Webcam mode)
-        async function startWebcam() {
-            try {
-                if (!websocket || websocket.readyState !== WebSocket.OPEN) {
-                    connectWebSocket();
-                }
-
-                updateStatus('Requesting camera...', 'processing');
-
-                // Use selected camera or default
-                const videoConstraints = {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                };
-
-                if (selectedCameraId) {
-                    videoConstraints.deviceId = { exact: selectedCameraId };
-                }
-
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    video: videoConstraints,
-                    audio: false
-                });
-                videoElement.srcObject = localStream;
-
-                updateStatus('Connecting...', 'processing');
-
-                peerConnection = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:172.18.247.175:3478', username: 'admin', credential: 'livevlm2024' }]
-                });
-
-                localStream.getTracks().forEach(track => {
-                    peerConnection.addTrack(track, localStream);
-                });
-
-                peerConnection.ontrack = (event) => {
-                    console.log('Received remote track');
-                    if (event.track.kind === 'video') {
-                        videoElement.srcObject = event.streams[0];
-                        // Explicitly play to ensure continuous frame flow
-                        videoElement.play().catch(err => {
-                            console.error('Error playing video:', err);
-                        });
-                    }
-                };
-
-                peerConnection.oniceconnectionstatechange = () => {
-                    console.log('ICE connection state:', peerConnection.iceConnectionState);
-                    switch (peerConnection.iceConnectionState) {
-                        case 'connected':
-                            updateStatus('Streaming', 'connected');
-                            break;
-                        case 'disconnected':
-                        case 'failed':
-                        case 'closed':
-                            updateStatus('Disconnected', 'disconnected');
-                            stop();
-                            break;
-                    }
-                };
-
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-
-                const response = await fetch('/offer', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        sdp: peerConnection.localDescription.sdp,
-                        type: peerConnection.localDescription.type,
-                        session_id: sessionId,
-                    }),
-                });
-
-                const answer = await response.json();
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-
-                isAnalysisRunning = true;
-                updateStatus('Streaming', 'connected');
-
-            } catch (error) {
-                console.error('Error starting webcam:', error);
-                updateStatus(`Error: ${error.message}`, 'disconnected');
-                stop();
-            }
+            // Only RTSP / IP camera / edge-device sources remain (browser webcam dropped, D-4)
+            await startRTSP();
         }
 
         // Start streaming (RTSP / IP camera / edge device) via MJPEG (Phase 1)
@@ -4299,18 +4110,6 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
             if (fadeTimeout) {
                 clearTimeout(fadeTimeout);
                 fadeTimeout = null;
-            }
-
-            // Stop webcam (if in webcam mode)
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-                localStream = null;
-            }
-
-            // Close WebRTC peer connection (used by both webcam and RTSP)
-            if (peerConnection) {
-                peerConnection.close();
-                peerConnection = null;
             }
 
             // Stop the MJPEG stream by clearing the <img> source

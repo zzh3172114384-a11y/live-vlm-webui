@@ -33,13 +33,6 @@ from collections import defaultdict
 
 import aiohttp
 from aiohttp import web
-from aiortc import (
-    RTCPeerConnection,
-    RTCSessionDescription,
-    RTCConfiguration,
-    RTCIceServer,
-)
-from aiortc.contrib.media import MediaRelay
 
 from .vlm_service import VLMService
 from .video_processor import VideoProcessorTrack
@@ -54,8 +47,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global objects
-relay = MediaRelay()
-pcs = set()
 vlm_service = None  # Kept for backwards compat; default session uses sessions["default"]
 websockets = set()  # Track active WebSocket connections (all)
 gpu_monitor = None  # GPU monitoring instance
@@ -564,119 +555,6 @@ async def gpu_monitor_loop():
         logger.error(f"Error in GPU monitoring loop: {e}")
 
 
-async def offer(request):
-    """Handle WebRTC offer from client (supports both webcam and RTSP). Uses session_id for per-session VLM."""
-    params = await request.json()
-    offer_sdp = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-    rtsp_url = params.get("rtsp_url")  # Optional RTSP URL for IP camera mode
-    session_id = params.get("session_id", "default")
-
-    session = get_or_create_session(session_id)
-    session_vlm = session["vlm_service"]
-    session_callback = get_session_callback(session_id)
-
-    # Create RTCPeerConnection with STUN servers for Docker/NAT compatibility
-    config = RTCConfiguration(
-        iceServers=[
-            RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
-            RTCIceServer(urls=["stun:stun1.l.google.com:19302"]),
-            RTCIceServer(urls=["turn:172.18.247.175:3478"], username="admin", credential="livevlm2024"),
-        ]
-    )
-    pc = RTCPeerConnection(configuration=config)
-    pcs.add(pc)
-
-    # Store RTSP track for cleanup
-    rtsp_cleanup_track = None
-
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange():
-        logger.info(f"Connection state: {pc.connectionState}")
-        if pc.connectionState in ["failed", "closed"]:
-            # Clean up RTSP track if exists
-            if rtsp_cleanup_track:
-                rtsp_cleanup_track.stop()
-                logger.info("RTSP track stopped on connection close")
-            await pc.close()
-            pcs.discard(pc)
-
-    @pc.on("iceconnectionstatechange")
-    async def on_iceconnectionstatechange():
-        logger.info(f"ICE connection state: {pc.iceConnectionState}")
-        if pc.iceConnectionState == "failed":
-            logger.error("ICE connection failed - check firewall/NAT settings")
-
-    @pc.on("icegatheringstatechange")
-    async def on_icegatheringstatechange():
-        logger.info(f"ICE gathering state: {pc.iceGatheringState}")
-
-    # If RTSP URL provided, create RTSP track instead of waiting for browser track
-    if rtsp_url:
-        logger.info(f"[{session_id}] Creating RTSP track for: {rtsp_url}")
-        try:
-            if rtsp_url.startswith("local://"):
-                device = rtsp_url.replace("local://", "")
-                rtsp_track = LocalCameraTrack(device)
-            else:
-                rtsp_track = RTSPVideoTrack(rtsp_url)
-            rtsp_cleanup_track = rtsp_track  # Store for cleanup
-
-            # Wait for initial connection to get stream info
-            await asyncio.sleep(0.5)
-
-            # Wrap RTSP track with relay first (same pattern as webcam)
-            relayed_rtsp = relay.subscribe(rtsp_track)
-
-            processor_track = VideoProcessorTrack(
-                relayed_rtsp, session_vlm, text_callback=session_callback
-            )
-
-            # Add processor directly to peer connection
-            pc.addTrack(processor_track)
-            logger.info("Added RTSP processor track to peer connection")
-
-        except Exception as e:
-            logger.error(f"Failed to create RTSP track: {e}")
-            return web.Response(
-                status=500,
-                content_type="application/json",
-                text=json.dumps({"error": f"Failed to connect to RTSP stream: {str(e)}"}),
-            )
-    else:
-        # Webcam mode: wait for browser to send track
-        @pc.on("track")
-        def on_track(track):
-            logger.info(f"Received track: {track.kind}")
-
-            if track.kind == "video":
-                # Create processor track with this session's VLM and session-scoped callback
-                processor_track = VideoProcessorTrack(
-                    relay.subscribe(track), session_vlm, text_callback=session_callback
-                )
-
-                # Add processed track back to connection
-                pc.addTrack(processor_track)
-                logger.info("Added processed video track back to peer connection")
-
-            @track.on("ended")
-            async def on_ended():
-                logger.info(f"Track {track.kind} ended")
-
-    # Handle offer
-    await pc.setRemoteDescription(offer_sdp)
-
-    # Create answer - this must happen after tracks are added
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-
-    logger.info(f"Created answer with {len(pc.getTransceivers())} transceivers")
-
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}),
-    )
-
-
 async def rtsp_start(request):
     """
     Start RTSP stream processing.
@@ -997,11 +875,6 @@ async def on_shutdown(app):
         await _stop_rtsp_session(session_id)
     logger.info("RTSP streams closed")
 
-    # Close all peer connections
-    coros = [pc.close() for pc in pcs]
-    await asyncio.gather(*coros)
-    pcs.clear()
-
     logger.info("Cleanup complete")
 
 
@@ -1021,7 +894,6 @@ async def create_app(test_mode=False):
     app.router.add_get("/models", models)
     app.router.add_get("/detect-services", detect_services)
     app.router.add_get("/ws", websocket_handler)
-    app.router.add_post("/offer", offer)
 
     # MJPEG video return path (Phase 1: replaces the WebRTC video return)
     app.router.add_get("/stream", mjpeg_stream)

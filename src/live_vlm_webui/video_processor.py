@@ -22,8 +22,6 @@ import asyncio
 import cv2
 import numpy as np
 from PIL import Image
-from aiortc import VideoStreamTrack
-from aiortc.mediastreams import MediaStreamError
 from typing import Optional
 import logging
 import time
@@ -38,10 +36,11 @@ av.logging.set_level(av.logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-class VideoProcessorTrack(VideoStreamTrack):
+class VideoProcessorTrack:
     """
-    Video track that receives frames, sends them to VLM for analysis,
-    and overlays responses on the video before sending back
+    Wraps a video source track: pulls frames, sends them to the VLM for analysis,
+    and returns the frame. No longer an aiortc VideoStreamTrack — frames are consumed
+    directly by the MJPEG /stream endpoint (and the RTSP API), not by a WebRTC pipeline.
     """
 
     # Class variable for frame processing interval (can be updated dynamically)
@@ -53,8 +52,7 @@ class VideoProcessorTrack(VideoStreamTrack):
     yolo_interval = 10  # Run YOLO every N frames
     yolo_model = None
 
-    def __init__(self, track: VideoStreamTrack, vlm_service: VLMService, text_callback=None):
-        super().__init__()
+    def __init__(self, track, vlm_service: VLMService, text_callback=None):
         self.track = track
         self.vlm_service = vlm_service
         self.text_callback = text_callback  # Callback to send text updates
@@ -212,9 +210,9 @@ class VideoProcessorTrack(VideoStreamTrack):
             # This avoids expensive BGR→YUV conversion
             return frame
 
-        except MediaStreamError:
-            # Track ended (user stopped, tab closed, etc.) — normal, not an error
-            logger.debug("Video track ended")
+        except StopAsyncIteration:
+            # Source ended/stopped — normal, not an error
+            logger.debug("Video source ended")
             raise
         except Exception as e:
             logger.error(f"Error processing frame: {e}", exc_info=True)

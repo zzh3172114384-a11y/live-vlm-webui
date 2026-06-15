@@ -1,7 +1,7 @@
 """
 Local Camera Video Track using PyAV (ffmpeg V4L2 backend).
 
-Provides VideoStreamTrack that reads from /dev/video* devices.
+Provides an async video track that reads from /dev/video* devices (no WebRTC).
 
 SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
@@ -13,7 +13,6 @@ import time
 from typing import Optional
 
 import av
-from aiortc import VideoStreamTrack
 from av import VideoFrame
 from av.container import InputContainer
 from av.video import VideoStream
@@ -21,7 +20,7 @@ from av.video import VideoStream
 logger = logging.getLogger(__name__)
 
 
-class LocalCameraTrack(VideoStreamTrack):
+class LocalCameraTrack:
     """
     Video track that reads from a local camera device using PyAV (ffmpeg).
 
@@ -38,7 +37,6 @@ class LocalCameraTrack(VideoStreamTrack):
         fps: int = 30,
         input_format: str = "mjpeg",
     ):
-        super().__init__()
         self.device = device
         self._stopped = False
         self._frame_count = 0
@@ -121,8 +119,6 @@ class LocalCameraTrack(VideoStreamTrack):
             finally:
                 self.container = None
                 self.stream = None
-
-        super().stop()
 
     @property
     def is_connected(self) -> bool:

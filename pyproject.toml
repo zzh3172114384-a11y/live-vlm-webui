@@ -43,7 +43,6 @@ classifiers = [
 dependencies = [
     "aiohttp>=3.9.5",
     "aiohttp-cors>=0.7.0",
-    "aiortc>=1.9.0",
     "opencv-python>=4.10.0",
     "numpy>=1.26.4",
     "Pillow>=10.4.0",
