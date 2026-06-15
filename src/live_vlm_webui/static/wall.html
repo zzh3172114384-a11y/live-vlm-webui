@@ -1,0 +1,302 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 OmniSight Contributors.
+SPDX-License-Identifier: Apache-2.0
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniSight 监控墙</title>
+    <style>
+        :root {
+            --bg: #0e0f12;
+            --panel: #16181d;
+            --border: #2a2d35;
+            --text: #e6e8ec;
+            --muted: #8b90a0;
+            --accent: #76b900;
+            --danger: #e5484d;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        }
+        header {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 20px; border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; background: var(--bg); z-index: 20;
+        }
+        header h1 { font-size: 18px; margin: 0; }
+        header h1 .accent { color: var(--accent); }
+        header .sub { color: var(--muted); font-size: 13px; }
+        header .spacer { flex: 1; }
+        header a.single { color: var(--muted); font-size: 13px; text-decoration: none; border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; }
+        header a.single:hover { color: var(--text); }
+
+        .addbar {
+            display: flex; gap: 8px; padding: 12px 20px; flex-wrap: wrap;
+            border-bottom: 1px solid var(--border); background: var(--panel);
+        }
+        .addbar input {
+            background: var(--bg); border: 1px solid var(--border); color: var(--text);
+            padding: 8px 10px; border-radius: 6px; font-size: 14px;
+        }
+        .addbar input#camUrl { flex: 1; min-width: 260px; }
+        .addbar button {
+            background: var(--accent); color: #000; border: none; font-weight: 600;
+            padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;
+        }
+        .addbar button:hover { filter: brightness(1.1); }
+        .addbar .hint { color: var(--muted); font-size: 12px; width: 100%; }
+
+        #grid {
+            display: grid; gap: 12px; padding: 16px 20px;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+        }
+        .cell {
+            background: #000; border: 1px solid var(--border); border-radius: 10px;
+            overflow: hidden; position: relative; aspect-ratio: 4 / 3;
+            display: flex; flex-direction: column;
+        }
+        .cell .video-wrap { position: relative; flex: 1; min-height: 0; background: #000; }
+        .cell img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .cell canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+        .cell .badge {
+            position: absolute; top: 8px; left: 8px; z-index: 3;
+            font-size: 12px; padding: 3px 8px; border-radius: 12px;
+            background: rgba(0,0,0,0.6); display: flex; align-items: center; gap: 6px;
+        }
+        .cell .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+        .cell .badge.online .dot { background: var(--accent); }
+        .cell .badge.offline .dot { background: var(--danger); }
+        .cell .remove {
+            position: absolute; top: 8px; right: 8px; z-index: 3;
+            background: rgba(0,0,0,0.6); color: var(--text); border: none; cursor: pointer;
+            width: 26px; height: 26px; border-radius: 50%; font-size: 14px; line-height: 1;
+        }
+        .cell .remove:hover { background: var(--danger); color: #fff; }
+        .cell .vlm {
+            background: var(--panel); border-top: 1px solid var(--border);
+            padding: 8px 10px; font-size: 13px; line-height: 1.4; min-height: 42px;
+            color: var(--text); max-height: 96px; overflow: auto;
+        }
+        .cell .vlm .meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+        .empty { color: var(--muted); padding: 40px 20px; text-align: center; grid-column: 1 / -1; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1><span class="accent">OmniSight</span> 监控墙</h1>
+        <span class="sub" id="summary">0 路</span>
+        <span class="spacer"></span>
+        <a class="single" href="/">单路视图</a>
+    </header>
+
+    <div class="addbar">
+        <input id="camId" placeholder="摄像头 ID (如 cam1)" size="14">
+        <input id="camUrl" placeholder="源地址 rtsp://… 或 http://host:8088/camera 或 local://dev">
+        <input id="camPrompt" placeholder="提示词(可选)" size="20">
+        <button onclick="addCamera()">添加摄像头</button>
+        <div class="hint">边缘设备(带检测框)请用 <code>/camera</code> 路径 + 同主机的 <code>/boxes</code> 自动叠框;框由浏览器绘制。</div>
+    </div>
+
+    <div id="grid"><div class="empty" id="emptyMsg">还没有摄像头。在上方添加一路开始。</div></div>
+
+    <script>
+        const cells = {};      // camera_id -> { el, img, canvas, vlm, badge, boxTimer, boxesUrl }
+        let websocket = null;
+
+        function deriveBoxesUrl(videoUrl) {
+            try {
+                const u = new URL(videoUrl, window.location.href);
+                if (!u.protocol.startsWith('http')) return null;
+                return u.origin + '/boxes';
+            } catch (e) { return null; }
+        }
+
+        // ── WebSocket: receive per-camera VLM results (broadcast, tagged with camera_id) ──
+        function connectWS() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            websocket = new WebSocket(`${proto}://${location.host}/ws?session_id=wall`);
+            websocket.onmessage = (ev) => {
+                let data;
+                try { data = JSON.parse(ev.data); } catch (e) { return; }
+                if (data.type === 'vlm_response' && data.camera_id && cells[data.camera_id]) {
+                    const c = cells[data.camera_id];
+                    c.vlm.querySelector('.text').textContent = data.text || '';
+                    if (data.metrics) {
+                        const m = data.metrics;
+                        c.vlm.querySelector('.meta').textContent =
+                            `延迟 ${Math.round(m.last_latency_ms || 0)}ms · 共 ${m.total_inferences || 0} 次`;
+                    }
+                }
+            };
+            websocket.onclose = () => { websocket = null; setTimeout(connectWS, 2000); };
+            websocket.onerror = () => { try { websocket.close(); } catch (e) {} };
+        }
+
+        // ── Detection-box overlay per cell (poll the proxied /boxes, draw on canvas) ──
+        function drawBoxes(cell, boxes) {
+            const canvas = cell.canvas, img = cell.img;
+            const wrapRect = canvas.getBoundingClientRect();
+            const cw = Math.round(wrapRect.width), ch = Math.round(wrapRect.height);
+            if (canvas.width !== cw) canvas.width = cw;
+            if (canvas.height !== ch) canvas.height = ch;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, cw, ch);
+            if (!boxes || !boxes.length) return;
+            const nw = img.naturalWidth, nh = img.naturalHeight;
+            if (!nw || !nh) return;
+            const ir = img.getBoundingClientRect();
+            const scale = Math.min(ir.width / nw, ir.height / nh);
+            const dw = nw * scale, dh = nh * scale;
+            const ox = (ir.left - wrapRect.left) + (ir.width - dw) / 2;
+            const oy = (ir.top - wrapRect.top) + (ir.height - dh) / 2;
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(118,185,0,0.95)';
+            ctx.font = '13px sans-serif';
+            ctx.textBaseline = 'top';
+            for (const b of boxes) {
+                const x = ox + b.x * dw, y = oy + b.y * dh, w = b.w * dw, h = b.h * dh;
+                ctx.strokeRect(x, y, w, h);
+                const label = b.label + (b.conf != null ? ' ' + Math.round(b.conf * 100) + '%' : '');
+                const tw = ctx.measureText(label).width;
+                const ly = Math.max(0, y - 17);
+                ctx.fillStyle = 'rgba(118,185,0,0.95)';
+                ctx.fillRect(x, ly, tw + 8, 17);
+                ctx.fillStyle = '#000';
+                ctx.fillText(label, x + 4, ly + 2);
+            }
+        }
+
+        function startBoxPoll(cell) {
+            if (!cell.boxesUrl) return;
+            const poll = async () => {
+                try {
+                    const resp = await fetch('/api/boxes?url=' + encodeURIComponent(cell.boxesUrl));
+                    const data = await resp.json();
+                    drawBoxes(cell, data.boxes || []);
+                } catch (e) { /* keep last */ }
+            };
+            poll();
+            cell.boxTimer = setInterval(poll, 120);
+        }
+
+        function createCell(cam) {
+            const el = document.createElement('div');
+            el.className = 'cell';
+            el.innerHTML = `
+                <div class="badge"><span class="dot"></span><span class="label"></span></div>
+                <button class="remove" title="移除">✕</button>
+                <div class="video-wrap">
+                    <img alt="${cam.camera_id}">
+                    <canvas></canvas>
+                </div>
+                <div class="vlm"><div class="text">等待分析…</div><div class="meta"></div></div>
+            `;
+            const cell = {
+                el,
+                img: el.querySelector('img'),
+                canvas: el.querySelector('canvas'),
+                vlm: el.querySelector('.vlm'),
+                badge: el.querySelector('.badge'),
+                boxesUrl: deriveBoxesUrl(cam.url),
+                boxTimer: null,
+            };
+            el.querySelector('.badge .label').textContent = cam.camera_id;
+            el.querySelector('.remove').onclick = () => removeCamera(cam.camera_id);
+            cell.img.src = '/stream?camera_id=' + encodeURIComponent(cam.camera_id);
+            cells[cam.camera_id] = cell;
+            document.getElementById('grid').appendChild(el);
+            startBoxPoll(cell);
+            return cell;
+        }
+
+        function updateBadge(cam) {
+            const cell = cells[cam.camera_id];
+            if (!cell) return;
+            const online = cam.connected && (cam.last_frame_age == null || cam.last_frame_age < 5);
+            cell.badge.className = 'badge ' + (online ? 'online' : 'offline');
+            const extra = online ? '' : (cam.reconnects ? ` · 重连 ${cam.reconnects}` : ' · 离线');
+            cell.badge.querySelector('.label').textContent = cam.camera_id + extra;
+        }
+
+        async function loadCameras() {
+            let list = [];
+            try {
+                const resp = await fetch('/api/cameras');
+                list = (await resp.json()).cameras || [];
+            } catch (e) { return; }
+
+            const ids = new Set(list.map(c => c.camera_id));
+            // remove cells for cameras that no longer exist
+            for (const id of Object.keys(cells)) {
+                if (!ids.has(id)) destroyCell(id);
+            }
+            // add/update
+            for (const cam of list) {
+                if (!cells[cam.camera_id]) createCell(cam);
+                updateBadge(cam);
+            }
+            document.getElementById('emptyMsg').style.display = list.length ? 'none' : 'block';
+            document.getElementById('summary').textContent = list.length + ' 路';
+        }
+
+        function destroyCell(id) {
+            const cell = cells[id];
+            if (!cell) return;
+            if (cell.boxTimer) clearInterval(cell.boxTimer);
+            cell.img.src = '';
+            cell.el.remove();
+            delete cells[id];
+        }
+
+        async function addCamera() {
+            const camera_id = document.getElementById('camId').value.trim();
+            const url = document.getElementById('camUrl').value.trim();
+            const prompt = document.getElementById('camPrompt').value.trim();
+            if (!camera_id || !url) { alert('请填写 摄像头 ID 和 源地址'); return; }
+            try {
+                const resp = await fetch('/api/cameras', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ camera_id, url, prompt: prompt || undefined }),
+                });
+                const data = await resp.json();
+                if (data.error) { alert('添加失败: ' + data.error); return; }
+                document.getElementById('camId').value = '';
+                document.getElementById('camUrl').value = '';
+                document.getElementById('camPrompt').value = '';
+                loadCameras();
+            } catch (e) { alert('添加失败: ' + e.message); }
+        }
+
+        async function removeCamera(id) {
+            if (!confirm('移除摄像头 ' + id + '?')) return;
+            try { await fetch('/api/cameras/' + encodeURIComponent(id), { method: 'DELETE' }); } catch (e) {}
+            destroyCell(id);
+            loadCameras();
+        }
+
+        connectWS();
+        loadCameras();
+        setInterval(loadCameras, 3000);  // refresh status / pick up cameras added elsewhere
+    </script>
+</body>
+</html>

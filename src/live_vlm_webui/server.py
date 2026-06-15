@@ -273,6 +273,14 @@ async def index(request):
     return web.Response(content_type="text/html", text=content)
 
 
+async def wall(request):
+    """Serve the monitoring-wall (multi-camera grid) page."""
+    content = open(
+        os.path.join(os.path.dirname(__file__), "static", "wall.html"), "r", encoding="utf-8"
+    ).read()
+    return web.Response(content_type="text/html", text=content)
+
+
 async def models(request):
     """Return available models from the VLM API"""
     try:
@@ -1084,6 +1092,7 @@ async def create_app(test_mode=False):
     # Create web application
     app = web.Application()
     app.router.add_get("/", index)
+    app.router.add_get("/wall", wall)
     app.router.add_get("/models", models)
     app.router.add_get("/detect-services", detect_services)
     app.router.add_get("/ws", websocket_handler)
