@@ -789,6 +789,16 @@ limitations under the License.
             padding: 0;
         }
 
+        /* Detection-box overlay canvas (Mode A) */
+        #boxOverlay {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+        }
+
         /* Video Overlay Text */
         .video-overlay {
             position: absolute;
@@ -2408,6 +2418,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                 </div>
 
                 <img id="videoElement" alt="stream">
+                <canvas id="boxOverlay"></canvas>
                 <div class="video-overlay" id="videoOverlay"></div>
             </div>
 
@@ -2566,6 +2577,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
         // Multi-session: one ID per page/tab; sent in WebSocket and /offer so this tab gets only its VLM output
         const sessionId = crypto.randomUUID ? crypto.randomUUID() : 'tab-' + Date.now() + '-' + Math.random().toString(36).slice(2);
         let isAnalysisRunning = false;
+        let boxPollTimer = null;  // Detection-box overlay poll timer (Mode A)
         let rtspSessionId = 'default';  // For RTSP mode
         // Enable markdown by default (user can disable if they prefer raw text)
         let markdownEnabled = localStorage.getItem('markdownEnabled') !== 'false';
@@ -4061,6 +4073,74 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
             await startRTSP();
         }
 
+        // ── Detection-box overlay (Mode A): poll the edge device's /boxes and draw on canvas ──
+        function deriveBoxesUrl(videoUrl) {
+            try {
+                const u = new URL(videoUrl, window.location.href);
+                if (!u.protocol.startsWith('http')) return null;  // rtsp:// has no /boxes endpoint
+                return u.origin + '/boxes';
+            } catch (e) { return null; }
+        }
+
+        function drawBoxes(boxes) {
+            const canvas = document.getElementById('boxOverlay');
+            if (!canvas || !videoElement) return;
+            const cardRect = canvas.getBoundingClientRect();
+            const cw = Math.round(cardRect.width), ch = Math.round(cardRect.height);
+            if (canvas.width !== cw) canvas.width = cw;
+            if (canvas.height !== ch) canvas.height = ch;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, cw, ch);
+            if (!boxes || !boxes.length) return;
+            const nw = videoElement.naturalWidth, nh = videoElement.naturalHeight;
+            if (!nw || !nh) return;
+            // Map normalized coords onto the actually-rendered image rect (object-fit: contain)
+            const ir = videoElement.getBoundingClientRect();
+            const scale = Math.min(ir.width / nw, ir.height / nh);
+            const dw = nw * scale, dh = nh * scale;
+            const ox = (ir.left - cardRect.left) + (ir.width - dw) / 2;
+            const oy = (ir.top - cardRect.top) + (ir.height - dh) / 2;
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(118,185,0,0.95)';
+            ctx.font = '14px sans-serif';
+            ctx.textBaseline = 'top';
+            for (const b of boxes) {
+                const x = ox + b.x * dw, y = oy + b.y * dh, w = b.w * dw, h = b.h * dh;
+                ctx.strokeRect(x, y, w, h);
+                const label = b.label + (b.conf != null ? ' ' + Math.round(b.conf * 100) + '%' : '');
+                const tw = ctx.measureText(label).width;
+                const ly = Math.max(0, y - 18);
+                ctx.fillStyle = 'rgba(118,185,0,0.95)';
+                ctx.fillRect(x, ly, tw + 8, 18);
+                ctx.fillStyle = '#000';
+                ctx.fillText(label, x + 4, ly + 2);
+            }
+        }
+
+        function startBoxOverlay(videoUrl) {
+            stopBoxOverlay();
+            const boxesUrl = deriveBoxesUrl(videoUrl);
+            if (!boxesUrl) return;  // non-http source → no overlay
+            const poll = async () => {
+                try {
+                    const resp = await fetch('/api/boxes?url=' + encodeURIComponent(boxesUrl));
+                    const data = await resp.json();
+                    drawBoxes(data.boxes || []);
+                } catch (e) { /* keep last drawn boxes on transient error */ }
+            };
+            poll();
+            boxPollTimer = setInterval(poll, 100);  // ~10 Hz, matches edge YOLO rate
+        }
+
+        function stopBoxOverlay() {
+            if (boxPollTimer) { clearInterval(boxPollTimer); boxPollTimer = null; }
+            const canvas = document.getElementById('boxOverlay');
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
         // Start streaming (RTSP / IP camera / edge device) via MJPEG (Phase 1)
         async function startRTSP() {
             try {
@@ -4084,6 +4164,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                 videoElement.onerror = () => updateStatus('Stream error', 'disconnected');
                 videoElement.onload = () => updateStatus('Streaming', 'connected');
                 videoElement.src = '/stream?' + params.toString();
+                startBoxOverlay(rtspUrl);
 
                 isAnalysisRunning = true;
                 updateStatus('Streaming', 'connected');
@@ -4114,6 +4195,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
 
             // Stop the MJPEG stream by clearing the <img> source
             videoElement.removeAttribute('src');
+            stopBoxOverlay();
 
             isAnalysisRunning = false;
             updateStatus('Connected', 'connected');

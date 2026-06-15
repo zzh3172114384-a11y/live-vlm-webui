@@ -39,6 +39,7 @@ from .video_processor import VideoProcessorTrack
 from .gpu_monitor import create_monitor
 from .rtsp_track import RTSPVideoTrack
 from .local_camera_track import LocalCameraTrack
+from .camera_manager import CameraManager
 
 # Configure logging
 logging.basicConfig(
@@ -52,6 +53,7 @@ websockets = set()  # Track active WebSocket connections (all)
 gpu_monitor = None  # GPU monitoring instance
 gpu_monitor_task = None  # Background task for GPU monitoring
 rtsp_tracks = {}  # Track active RTSP streams {session_id: (rtsp_track, processor_track)}
+camera_manager = CameraManager()  # Global shared cameras for the monitoring wall (D-1)
 
 # Multi-session state (0.4.0)
 default_vlm_config = {}  # Set at startup; used to create new sessions
@@ -107,6 +109,44 @@ def get_session_callback(session_id: str):
                     except (TypeError, ValueError):
                         out["response_payload"] = payload
         send_to_session(session_id, json.dumps(out))
+
+    return callback
+
+
+def broadcast_all(message: str):
+    """Send a message to every connected WebSocket client (used for shared camera events)."""
+    for ws in list(websockets):
+        try:
+            asyncio.create_task(ws.send_str(message))
+        except Exception as e:
+            logger.error(f"Error broadcasting: {e}")
+
+
+def make_camera_vlm_service(prompt=None):
+    """Create a dedicated VLMService for one shared camera, from the default config."""
+    cfg = default_vlm_config
+    return VLMService(
+        model=cfg.get("model", "meta/llama-3.2-11b-vision-instruct"),
+        api_base=cfg.get("api_base", "http://localhost:8000/v1"),
+        api_key=cfg.get("api_key", "EMPTY"),
+        prompt=prompt or cfg.get("prompt", "Describe what you see in this image in one sentence."),
+    )
+
+
+def make_camera_callback(camera_id: str):
+    """Return a text_callback that broadcasts a camera's VLM result (tagged with camera_id)."""
+
+    def callback(text: str, metrics: dict):
+        broadcast_all(
+            json.dumps(
+                {
+                    "type": "vlm_response",
+                    "camera_id": camera_id,
+                    "text": text,
+                    "metrics": metrics,
+                }
+            )
+        )
 
     return callback
 
@@ -645,18 +685,75 @@ async def rtsp_start(request):
         )
 
 
+async def _stream_shared_camera(request, camera_id):
+    """
+    Stream a shared monitoring-wall camera's latest frames as MJPEG.
+
+    Reads the camera's latest-frame buffer — does NOT open a new source — so any number
+    of viewers share one source and one VLM stream (D-1). Slow viewers just skip frames.
+    """
+    cam = camera_manager.get(camera_id)
+    if cam is None:
+        return web.Response(
+            status=404,
+            content_type="application/json",
+            text=json.dumps({"error": f"Unknown camera_id: {camera_id}"}),
+        )
+
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "multipart/x-mixed-replace; boundary=frame",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Connection": "close",
+        },
+    )
+    await response.prepare(request)
+    logger.info(f"Viewer attached to camera {camera_id}")
+    last_sent = -1
+    try:
+        while True:
+            jpeg = cam.latest_jpeg
+            fid = cam.frame_id
+            if jpeg is not None and fid != last_sent:
+                last_sent = fid
+                await response.write(
+                    b"--frame\r\nContent-Type: image/jpeg\r\n"
+                    + f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
+                    + jpeg
+                    + b"\r\n"
+                )
+            else:
+                await asyncio.sleep(0.03)  # wait for the next frame (~33 Hz poll)
+    except (asyncio.CancelledError, ConnectionResetError, ConnectionError):
+        pass  # viewer disconnected — normal
+    except Exception as e:
+        logger.error(f"Shared camera stream error for {camera_id}: {e}")
+    finally:
+        logger.info(f"Viewer detached from camera {camera_id}")
+    return response
+
+
 async def mjpeg_stream(request):
     """
-    Phase 1: stream a video source to the browser as MJPEG
-    (multipart/x-mixed-replace), replacing the WebRTC video-return path.
+    Stream a video source to the browser as MJPEG (multipart/x-mixed-replace),
+    the replacement for the old WebRTC video-return path.
 
-    Frames are routed through VideoProcessorTrack so the VLM pipeline still runs;
-    analysis results continue to reach the browser over the existing WebSocket via
-    the per-session callback. One source is opened per stream connection (sharing
-    across viewers is a later phase / CameraManager).
+    Two modes:
+      GET /stream?camera_id=<id>          — shared monitoring-wall camera (one source,
+                                            many viewers; VLM runs once per camera)
+      GET /stream?rtsp_url=rtsp://...&session_id=optional  — ad-hoc single source
+                                            (rtsp_url=local://<device> for local camera)
 
-    GET /stream?rtsp_url=rtsp://...&session_id=optional   (rtsp_url=local://<device> for local camera)
+    For the ad-hoc mode, frames are routed through VideoProcessorTrack so the VLM runs
+    and results reach the browser over the per-session WebSocket; one source is opened
+    per connection.
     """
+    # Shared camera path (monitoring wall): read the camera's latest-frame buffer.
+    camera_id = request.rel_url.query.get("camera_id")
+    if camera_id:
+        return await _stream_shared_camera(request, camera_id)
+
     rtsp_url = request.rel_url.query.get("rtsp_url")
     session_id = request.rel_url.query.get("session_id", "default")
     try:
@@ -730,6 +827,77 @@ async def mjpeg_stream(request):
         logger.info(f"MJPEG stream stopped for session {session_id}")
 
     return response
+
+
+async def boxes_proxy(request):
+    """
+    Proxy an edge device's /boxes JSON to the browser (detection-box overlay, Mode A).
+
+    The page is served over HTTPS but edge devices serve plain HTTP, so the browser cannot
+    fetch the device's /boxes directly (mixed-content). The server fetches it here and returns
+    the normalized detections JSON. Returns empty boxes on any error so the overlay degrades
+    gracefully (no frozen/stale boxes). ClientSession has trust_env=False, so LAN requests go
+    direct (no proxy) like the video path.
+
+    GET /api/boxes?url=http://<device>:8088/boxes
+    """
+    url = request.rel_url.query.get("url")
+    if not url:
+        return web.json_response({"boxes": []})
+    try:
+        timeout = aiohttp.ClientTimeout(total=3)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                data = await resp.json(content_type=None)
+        return web.json_response(data)
+    except Exception as e:
+        logger.debug(f"boxes proxy failed for {url}: {e}")
+        return web.json_response({"boxes": []})
+
+
+async def cameras_list(request):
+    """List all shared monitoring-wall cameras and their health stats."""
+    return web.json_response({"cameras": camera_manager.list()})
+
+
+async def cameras_add(request):
+    """
+    Add (or get) a shared monitoring-wall camera. Opens one source + one VLM stream,
+    shared by all viewers (D-1).
+
+    POST /api/cameras
+    Body: {"camera_id": "...", "url": "rtsp://... | http://.../camera | local://dev", "prompt": "optional"}
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    camera_id = (data.get("camera_id") or "").strip()
+    url = (data.get("url") or "").strip()
+    prompt = data.get("prompt")
+    if not camera_id or not url:
+        return web.json_response({"error": "camera_id and url are required"}, status=400)
+
+    existing = camera_manager.get(camera_id)
+    if existing:
+        return web.json_response({"status": "exists", "camera": existing.stats()})
+
+    vlm = make_camera_vlm_service(prompt)
+    cam = camera_manager.add(camera_id, url, vlm, text_callback=make_camera_callback(camera_id))
+    await cam.start()
+    logger.info(f"Camera added: {camera_id} -> {url}")
+    return web.json_response({"status": "added", "camera": cam.stats()})
+
+
+async def cameras_remove(request):
+    """Remove a shared camera. DELETE /api/cameras/{camera_id}"""
+    camera_id = request.match_info.get("camera_id")
+    removed = await camera_manager.remove(camera_id)
+    if not removed:
+        return web.json_response({"error": f"Unknown camera_id: {camera_id}"}, status=404)
+    logger.info(f"Camera removed: {camera_id}")
+    return web.json_response({"status": "removed", "camera_id": camera_id})
 
 
 async def rtsp_stop(request):
@@ -875,6 +1043,10 @@ async def on_shutdown(app):
         await _stop_rtsp_session(session_id)
     logger.info("RTSP streams closed")
 
+    # Stop all shared cameras
+    await camera_manager.stop_all()
+    logger.info("Shared cameras stopped")
+
     logger.info("Cleanup complete")
 
 
@@ -897,6 +1069,13 @@ async def create_app(test_mode=False):
 
     # MJPEG video return path (Phase 1: replaces the WebRTC video return)
     app.router.add_get("/stream", mjpeg_stream)
+    # Detection-box overlay (Mode A): proxy the edge device's /boxes JSON
+    app.router.add_get("/api/boxes", boxes_proxy)
+
+    # Monitoring-wall shared cameras (Phase 2)
+    app.router.add_get("/api/cameras", cameras_list)
+    app.router.add_post("/api/cameras", cameras_add)
+    app.router.add_delete("/api/cameras/{camera_id}", cameras_remove)
 
     # RTSP endpoints
     app.router.add_post("/api/rtsp/start", rtsp_start)
@@ -1089,7 +1268,7 @@ def main():
     parser.add_argument(
         "--no-ssl",
         action="store_true",
-        help="Disable SSL (not recommended - webcam requires HTTPS)",
+        help="Disable SSL and serve over plain HTTP (fine for trusted LAN use)",
     )
 
     args = parser.parse_args()
@@ -1185,44 +1364,33 @@ def main():
     # Create web application using create_app
     app = asyncio.run(create_app(test_mode=False))
 
-    # Setup SSL (auto-generate certificates if needed)
+    # Setup SSL (auto-generate certificates if needed).
+    # HTTPS is no longer mandatory: the browser-webcam source that required it was
+    # removed (video now arrives as MJPEG over HTTP). If certs are unavailable we fall
+    # back to plain HTTP with a warning instead of exiting — convenient for trusted LAN use.
     ssl_context = None
     protocol = "http"
     if not args.no_ssl:
         # Try to auto-generate if certificates don't exist
         if not os.path.exists(args.ssl_cert) or not os.path.exists(args.ssl_key):
-            success = generate_self_signed_cert(args.ssl_cert, args.ssl_key)
-            if not success:
-                # FAIL FAST - SSL is required for webcam access
-                logger.error("")
-                logger.error("❌ Cannot start server without SSL certificates")
-                logger.error("❌ Webcam access requires HTTPS!")
-                logger.error("")
-                logger.error("🔧 To fix, install openssl:")
-                logger.error("   Linux/Jetson: sudo apt install openssl")
-                logger.error("   macOS: brew install openssl")
-                logger.error("")
-                logger.error("   Then restart the server")
-                logger.error("")
-                logger.error(
-                    "⚠️  Or run with --no-ssl if you don't need camera access (not recommended)"
-                )
-                logger.error("")
-                sys.exit(1)
+            generate_self_signed_cert(args.ssl_cert, args.ssl_key)
 
-        # Load certificates (they must exist at this point)
+        # Load certificates if available; otherwise fall back to HTTP
         if os.path.exists(args.ssl_cert) and os.path.exists(args.ssl_key):
-            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            ssl_context.load_cert_chain(args.ssl_cert, args.ssl_key)
-            protocol = "https"
-            logger.info("SSL enabled - using HTTPS")
+            try:
+                ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ssl_context.load_cert_chain(args.ssl_cert, args.ssl_key)
+                protocol = "https"
+                logger.info("SSL enabled - using HTTPS")
+            except Exception as e:
+                ssl_context = None
+                protocol = "http"
+                logger.warning(f"⚠️  Failed to load SSL certificates ({e}) - falling back to HTTP")
         else:
-            # This should never happen, but just in case
-            logger.error("❌ SSL certificates missing after generation - unexpected error")
-            sys.exit(1)
+            logger.warning("⚠️  No SSL certificates available - serving over plain HTTP")
+            logger.warning("   (install openssl, or pass --ssl-cert/--ssl-key, to enable HTTPS)")
     else:
-        logger.warning("⚠️  SSL disabled with --no-ssl flag")
-        logger.warning("⚠️  Webcam access will NOT work without HTTPS!")
+        logger.warning("⚠️  SSL disabled with --no-ssl flag - serving over plain HTTP")
 
     # Get network addresses
     import socket
