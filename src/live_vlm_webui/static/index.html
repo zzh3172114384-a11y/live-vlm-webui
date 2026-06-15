@@ -776,7 +776,7 @@ limitations under the License.
             flex-direction: column;
         }
 
-        video {
+        #videoElement {
             width: 100%;
             flex: 1;
             min-height: 240px;
@@ -818,7 +818,7 @@ limitations under the License.
             display: block;
         }
 
-        video.mirrored {
+        #videoElement.mirrored {
             transform: scaleX(-1);
         }
 
@@ -1031,7 +1031,7 @@ limitations under the License.
             border: none;
         }
 
-        .video-card.fullscreen video {
+        .video-card.fullscreen #videoElement {
             width: 100%;
             height: 100%;
             object-fit: contain;
@@ -2258,19 +2258,18 @@ limitations under the License.
                 <div class="panel-content" id="cameraConfig">
                     <!-- Input Source Tabs -->
                     <div class="input-source-tabs">
-                        <button class="input-source-tab active" data-source="webcam">
+                        <button class="input-source-tab" data-source="webcam" style="display: none;">
                             <i data-lucide="video" style="width: 14px; height: 14px; margin-right: 4px;"></i>
                             Webcam
                         </button>
-                        <button class="input-source-tab" data-source="rtsp" title="RTSP IP Camera (Beta - Tested with Reolink RLC-811A)">
+                        <button class="input-source-tab active" data-source="rtsp" title="RTSP / IP 摄像头 / 边缘设备（MJPEG）">
                             <i data-lucide="cast" style="width: 14px; height: 14px; margin-right: 4px;"></i>
-                            RTSP Stream
-                            <span class="beta-badge">BETA</span>
+                            视频源
                         </button>
                     </div>
 
-                    <!-- Webcam Controls -->
-                    <div id="webcamControls">
+                    <!-- Webcam Controls (browser camera dropped per D-4; hidden) -->
+                    <div id="webcamControls" style="display: none;">
                         <div class="form-group">
                             <label>Camera Selection</label>
                             <select id="cameraSelect">
@@ -2280,8 +2279,8 @@ limitations under the License.
                         </div>
                     </div>
 
-                    <!-- RTSP Controls -->
-                    <div id="rtspControls" style="display: none;">
+                    <!-- RTSP / edge-device Controls (default source) -->
+                    <div id="rtspControls">
                         <div class="form-group">
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
                                 <div class="tooltip-wrapper" style="margin-bottom: 0; flex: 1;">
@@ -2408,7 +2407,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                     </button>
                 </div>
 
-                <video id="videoElement" autoplay playsinline muted></video>
+                <img id="videoElement" alt="stream">
                 <div class="video-overlay" id="videoOverlay"></div>
             </div>
 
@@ -2955,8 +2954,8 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
             }
         }
 
-        // Enumerate cameras on page load
-        enumerateCameras();
+        // Browser webcam source dropped (D-4) — skip camera enumeration (no getUserMedia prompt)
+        // enumerateCameras();
 
         // Theme management: Honor OS preference with manual override support
         function applyTheme(theme) {
@@ -4153,7 +4152,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
             document.getElementById('smallStopBtn').classList.add('show');
 
             const activeTab = document.querySelector('.input-source-tab.active');
-            const inputSource = activeTab ? activeTab.getAttribute('data-source') : 'webcam';
+            const inputSource = activeTab ? activeTab.getAttribute('data-source') : 'rtsp';
 
             if (inputSource === 'webcam') {
                 await startWebcam();
@@ -4251,7 +4250,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
             }
         }
 
-        // Start RTSP mode
+        // Start streaming (RTSP / IP camera / edge device) via MJPEG (Phase 1)
         async function startRTSP() {
             try {
                 if (!websocket || websocket.readyState !== WebSocket.OPEN) {
@@ -4261,109 +4260,31 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                 const rtspUrl = document.getElementById('rtspUrl').value.trim();
 
                 if (!rtspUrl) {
-                    alert('Please enter an RTSP URL');
+                    alert('请输入视频源地址（rtsp:// 或 http://.../mjpeg）');
                     return;
                 }
 
-                updateStatus('Connecting to RTSP stream...', 'processing');
+                updateStatus('Connecting to stream...', 'processing');
 
-                // Create WebRTC peer connection (no local stream needed for RTSP)
-                peerConnection = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:172.18.247.175:3478', username: 'admin', credential: 'livevlm2024' }]
-                });
-
-                // Receive processed video from server
-                peerConnection.ontrack = (event) => {
-                    console.log('Received RTSP stream from server');
-                    if (event.track.kind === 'video') {
-                        videoElement.srcObject = event.streams[0];
-                        // Explicitly play the video to ensure continuous frame flow
-                        videoElement.play().catch(err => {
-                            console.error('Error playing video:', err);
-                        });
-                        updateStatus('Streaming', 'connected');
-                    }
-                };
-
-                peerConnection.oniceconnectionstatechange = () => {
-                    console.log('ICE connection state:', peerConnection.iceConnectionState);
-                    switch (peerConnection.iceConnectionState) {
-                        case 'connected':
-                            updateStatus('Streaming', 'connected');
-                            break;
-                        case 'disconnected':
-                        case 'failed':
-                        case 'closed':
-                            updateStatus('Disconnected', 'disconnected');
-                            stop();
-                            break;
-                    }
-                };
-
-                // Create offer (recvonly - we're only receiving video from server)
-                peerConnection.addTransceiver('video', { direction: 'recvonly' });
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-
-                // Wait for ICE gathering to complete before sending offer (with timeout)
-                // This ensures all ICE candidates are embedded in the SDP
-                console.log('Waiting for ICE gathering to complete...');
-                await new Promise((resolve) => {
-                    if (peerConnection.iceGatheringState === 'complete') {
-                        resolve();
-                    } else {
-                        const checkState = () => {
-                            if (peerConnection.iceGatheringState === 'complete') {
-                                peerConnection.removeEventListener('icegatheringstatechange', checkState);
-                                resolve();
-                            }
-                        };
-                        peerConnection.addEventListener('icegatheringstatechange', checkState);
-
-                        // Timeout after 5 seconds - proceed anyway to avoid hanging
-                        setTimeout(() => {
-                            peerConnection.removeEventListener('icegatheringstatechange', checkState);
-                            console.warn('ICE gathering timeout - proceeding anyway');
-                            resolve();
-                        }, 5000);
-                    }
-                });
-                console.log('ICE gathering state:', peerConnection.iceGatheringState, '- sending offer');
-
-                // Send offer with RTSP URL and session to server
-                const response = await fetch('/offer', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sdp: peerConnection.localDescription.sdp,
-                        type: peerConnection.localDescription.type,
-                        rtsp_url: rtspUrl,
-                        session_id: sessionId,
-                    })
-                });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Failed to connect to RTSP stream');
-                }
-
-                const answer = await response.json();
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                // MJPEG return path: point the <img> at the server /stream endpoint.
+                // The server pulls the source, runs the VLM, and streams JPEG frames back;
+                // VLM analysis results still arrive over the existing WebSocket.
+                const params = new URLSearchParams({ rtsp_url: rtspUrl, session_id: sessionId });
+                videoElement.onerror = () => updateStatus('Stream error', 'disconnected');
+                videoElement.onload = () => updateStatus('Streaming', 'connected');
+                videoElement.src = '/stream?' + params.toString();
 
                 isAnalysisRunning = true;
+                updateStatus('Streaming', 'connected');
 
-                // Disable RTSP URL field and Test button while streaming
+                // Disable URL field and Test button while streaming
                 rtspUrlInput.disabled = true;
                 document.getElementById('testRtspBtn').disabled = true;
 
             } catch (error) {
-                console.error('Error starting RTSP:', error);
+                console.error('Error starting stream:', error);
                 updateStatus(`Error: ${error.message}`, 'disconnected');
-                alert('Failed to connect to RTSP stream: ' + error.message);
-                if (peerConnection) {
-                    peerConnection.close();
-                    peerConnection = null;
-                }
+                alert('无法连接视频源: ' + error.message);
             }
         }
 
@@ -4392,7 +4313,8 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                 peerConnection = null;
             }
 
-            videoElement.srcObject = null;
+            // Stop the MJPEG stream by clearing the <img> source
+            videoElement.removeAttribute('src');
 
             isAnalysisRunning = false;
             updateStatus('Connected', 'connected');
