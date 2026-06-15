@@ -20,6 +20,7 @@ Main server that handles WebRTC connections and serves the web interface
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
@@ -766,6 +767,93 @@ async def rtsp_start(request):
         )
 
 
+async def mjpeg_stream(request):
+    """
+    Phase 1: stream a video source to the browser as MJPEG
+    (multipart/x-mixed-replace), replacing the WebRTC video-return path.
+
+    Frames are routed through VideoProcessorTrack so the VLM pipeline still runs;
+    analysis results continue to reach the browser over the existing WebSocket via
+    the per-session callback. One source is opened per stream connection (sharing
+    across viewers is a later phase / CameraManager).
+
+    GET /stream?rtsp_url=rtsp://...&session_id=optional   (rtsp_url=local://<device> for local camera)
+    """
+    rtsp_url = request.rel_url.query.get("rtsp_url")
+    session_id = request.rel_url.query.get("session_id", "default")
+    try:
+        quality = int(request.rel_url.query.get("quality") or 80)
+    except ValueError:
+        quality = 80
+
+    if not rtsp_url:
+        return web.Response(
+            status=400,
+            content_type="application/json",
+            text=json.dumps({"error": "Missing rtsp_url query parameter"}),
+        )
+
+    # Open the source track (RTSP / HTTP-MJPEG, or local camera)
+    try:
+        if rtsp_url.startswith("local://"):
+            source_track = LocalCameraTrack(rtsp_url[len("local://") :])
+        else:
+            source_track = RTSPVideoTrack(rtsp_url)
+    except Exception as e:
+        logger.error(f"Failed to open video source for MJPEG stream: {e}")
+        return web.Response(
+            status=502,
+            content_type="application/json",
+            text=json.dumps({"error": f"Failed to connect to video source: {str(e)}"}),
+        )
+
+    # Route frames through the processor so the VLM runs and results go out over WS
+    session = get_or_create_session(session_id)
+    processor_track = VideoProcessorTrack(
+        source_track, session["vlm_service"], text_callback=get_session_callback(session_id)
+    )
+
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "multipart/x-mixed-replace; boundary=frame",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Connection": "close",
+        },
+    )
+    await response.prepare(request)
+    logger.info(f"MJPEG stream started for session {session_id}: {rtsp_url}")
+
+    try:
+        while True:
+            try:
+                frame = await processor_track.recv()
+            except StopAsyncIteration:
+                break
+            # av.VideoFrame -> PIL -> JPEG bytes (boxes burned into the source pixels survive)
+            buf = io.BytesIO()
+            frame.to_image().save(buf, format="JPEG", quality=quality)
+            data = buf.getvalue()
+            await response.write(
+                b"--frame\r\nContent-Type: image/jpeg\r\n"
+                + f"Content-Length: {len(data)}\r\n\r\n".encode()
+                + data
+                + b"\r\n"
+            )
+    except (asyncio.CancelledError, ConnectionResetError, ConnectionError):
+        pass  # client disconnected — normal
+    except Exception as e:
+        logger.error(f"MJPEG stream error for {session_id}: {e}")
+    finally:
+        try:
+            source_track.stop()
+        except Exception:
+            pass
+        logger.info(f"MJPEG stream stopped for session {session_id}")
+
+    return response
+
+
 async def rtsp_stop(request):
     """
     Stop RTSP stream processing.
@@ -934,6 +1022,9 @@ async def create_app(test_mode=False):
     app.router.add_get("/detect-services", detect_services)
     app.router.add_get("/ws", websocket_handler)
     app.router.add_post("/offer", offer)
+
+    # MJPEG video return path (Phase 1: replaces the WebRTC video return)
+    app.router.add_get("/stream", mjpeg_stream)
 
     # RTSP endpoints
     app.router.add_post("/api/rtsp/start", rtsp_start)
