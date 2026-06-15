@@ -54,12 +54,31 @@ gpu_monitor = None  # GPU monitoring instance
 gpu_monitor_task = None  # Background task for GPU monitoring
 rtsp_tracks = {}  # Track active RTSP streams {session_id: (rtsp_track, processor_track)}
 camera_manager = CameraManager()  # Global shared cameras for the monitoring wall (D-1)
+inference_semaphore = None  # Global VLM concurrency limiter (InferencePool); lazily created
 
 # Multi-session state (0.4.0)
 default_vlm_config = {}  # Set at startup; used to create new sessions
 sessions = {}  # session_id -> {"vlm_service": VLMService}
 session_websockets = defaultdict(set)  # session_id -> set of ws
 ws_to_session = {}  # ws -> session_id
+
+
+def get_inference_semaphore():
+    """Lazily create the global VLM inference-concurrency limiter (InferencePool).
+
+    Caps total concurrent inferences across ALL cameras/sessions so N cameras can't
+    overload the backend. Size from env LIVE_VLM_MAX_CONCURRENCY (default 2; D-3 — tune
+    to the backend's real concurrency via load testing).
+    """
+    global inference_semaphore
+    if inference_semaphore is None:
+        try:
+            n = max(1, int(os.environ.get("LIVE_VLM_MAX_CONCURRENCY", "2")))
+        except ValueError:
+            n = 2
+        inference_semaphore = asyncio.Semaphore(n)
+        logger.info(f"Inference pool initialized: max_concurrency={n}")
+    return inference_semaphore
 
 
 def get_or_create_session(session_id: str):
@@ -72,6 +91,7 @@ def get_or_create_session(session_id: str):
                 api_base=cfg.get("api_base", "http://localhost:8000/v1"),
                 api_key=cfg.get("api_key", "EMPTY"),
                 prompt=cfg.get("prompt", "Describe what you see in this image in one sentence."),
+                inference_semaphore=get_inference_semaphore(),
             ),
             "show_request_payload": False,
             "show_response_payload": False,
@@ -130,6 +150,7 @@ def make_camera_vlm_service(prompt=None):
         api_base=cfg.get("api_base", "http://localhost:8000/v1"),
         api_key=cfg.get("api_key", "EMPTY"),
         prompt=prompt or cfg.get("prompt", "Describe what you see in this image in one sentence."),
+        inference_semaphore=get_inference_semaphore(),
     )
 
 

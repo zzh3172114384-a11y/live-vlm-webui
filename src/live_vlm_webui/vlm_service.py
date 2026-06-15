@@ -41,6 +41,7 @@ class VLMService:
         api_key: str = "EMPTY",
         prompt: str = "Describe what you see in this image in one sentence.",
         max_tokens: int = 512,
+        inference_semaphore=None,
     ):
         """
         Initialize VLM service
@@ -51,12 +52,15 @@ class VLMService:
             api_key: API key (use "EMPTY" for local servers)
             prompt: Default prompt to use for image analysis
             max_tokens: Maximum tokens to generate
+            inference_semaphore: Optional shared asyncio.Semaphore that caps total concurrent
+                inferences across all cameras/sessions (global back-pressure; see InferencePool).
         """
         self.model = model
         self.api_base = api_base
         self.api_key = api_key if api_key else "EMPTY"
         self.prompt = prompt
         self.max_tokens = max_tokens
+        self.inference_semaphore = inference_semaphore
         self.client = AsyncOpenAI(base_url=api_base, api_key=api_key)
         self.current_response = "Initializing..."
         self.is_processing = False
@@ -199,10 +203,22 @@ class VLMService:
             logger.debug("VLM busy, skipping frame")
             return
 
+        # Global inference pool: if the shared concurrency limit is saturated, DROP this
+        # frame rather than queue it. Back-pressure across all cameras prevents the backend
+        # from being overloaded when many cameras fire at once (always analyze the latest).
+        sem = self.inference_semaphore
+        if sem is not None and sem.locked():
+            logger.debug("Inference pool full, skipping frame")
+            return
+
         async with self._processing_lock:
             self.is_processing = True
             try:
-                response = await self.analyze_image(image, prompt)
+                if sem is not None:
+                    async with sem:
+                        response = await self.analyze_image(image, prompt)
+                else:
+                    response = await self.analyze_image(image, prompt)
                 self.current_response = response
             finally:
                 self.is_processing = False
