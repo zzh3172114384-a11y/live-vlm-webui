@@ -1997,6 +1997,88 @@ limitations under the License.
             lucide.createIcons();
         }
     </script>
+
+    <!-- i18n: language switch (中文 / English) for static UI labels -->
+    <script>
+        const I18N = {
+            "hdr.subtitle":      { zh: "局域网多路视觉智能监控墙", en: "Real-time multi-camera VLM monitoring wall" },
+            "hdr.wall":          { zh: "监控墙", en: "Wall" },
+            "hdr.wallTitle":     { zh: "监控墙（多路同屏）", en: "Monitoring wall (multi-camera)" },
+            "src.title":         { zh: "视频源", en: "Video Source" },
+            "src.tab":           { zh: "视频源", en: "Source" },
+            "src.rtspUrl":       { zh: "RTSP 流地址", en: "RTSP Stream URL" },
+            "src.betaTag":       { zh: "实验:", en: "Beta:" },
+            "src.betaMsg":       { zh: "RTSP/IP 摄像头为实验功能，部分型号可能不兼容。", en: "RTSP/IP cameras are experimental; some models may not work." },
+            "src.interval":      { zh: "抽帧间隔", en: "Frame Processing Interval" },
+            "src.intervalHint":  { zh: "每 N 帧处理一次（越小越频繁）", en: "Process every Nth frame (Lower = more frequent)" },
+            "prompt.title":      { zh: "提示词编辑", en: "Prompt Editor" },
+            "prompt.presets":    { zh: "快捷预设", en: "Quick Presets" },
+            "prompt.custom":     { zh: "自定义提示词", en: "Custom Prompt" },
+            "prompt.customPh":   { zh: "在此输入自定义提示词…", en: "Enter your custom prompt here..." },
+            "prompt.maxTokens":  { zh: "最大 Token 数", en: "Max Tokens" },
+            "prompt.maxTokensHint": { zh: "短答用小值（是/否约 10），详细描述用大值", en: "Lower for short answers (Yes/No: ~10), higher for detailed descriptions" },
+            "btn.start":         { zh: "开始", en: "Start" },
+            "btn.mirror":        { zh: "镜像", en: "Mirror" },
+            "out.title":         { zh: "VLM 输出", en: "VLM Output Info" },
+            "out.model":         { zh: "模型:", en: "Model:" },
+            "stats.title":       { zh: "本机系统状态", en: "Local System Stats" },
+            "set.title":         { zh: "设置", en: "Settings" },
+            "set.layout":        { zh: "布局", en: "Layout" },
+            "set.mainOrder":     { zh: "主区顺序", en: "Main Content Order" },
+            "set.mainOrderDesc": { zh: "选择哪个区块显示在上方", en: "Choose which element appears at the top" },
+            "set.optCamFirst":   { zh: "画面 → VLM 输出", en: "Camera → VLM Output Info" },
+            "set.optVlmFirst":   { zh: "VLM 输出 → 画面", en: "VLM Output Info → Camera" },
+            "set.overlay":       { zh: "画面上叠加 VLM 输出", en: "VLM Output on Camera View" },
+            "set.overlayDesc":   { zh: "在视频画面上直接叠加文字", en: "Show text overlay directly on video feed" },
+            "set.optNone":       { zh: "不显示", en: "None" },
+            "set.optTop":        { zh: "顶部", en: "At the top" },
+            "set.optBottom":     { zh: "底部", en: "At the bottom" },
+            "set.visualEffects": { zh: "视觉效果", en: "Visual Effects" },
+            "set.popin":         { zh: "弹入动画", en: "Pop-in Animation" },
+            "set.popinDesc":     { zh: "新 VLM 结果到达时的缩放动画", en: "Scale animation when new VLM response arrives" },
+            "set.glow":          { zh: "绿色辉光", en: "Green Glow Effect" },
+            "set.glowDesc":      { zh: "新结果时边框辉光", en: "Border glow on new VLM response" },
+            "set.fade":          { zh: "淡出效果", en: "Fade Effect" },
+            "set.fadeDesc":      { zh: "结果 2 秒后逐渐淡出", en: "Gradually fade response after 2 seconds" },
+            "set.visualStyle":   { zh: "视觉风格", en: "Visual Style" },
+            "set.colorful":      { zh: "彩色界面强调", en: "Colorful UI Accents" },
+            "set.colorfulDesc":  { zh: "彩色图标与输入聚焦辉光", en: "Color-coded icons and input focus glows" },
+            "set.video":         { zh: "视频", en: "Video" },
+            "set.maxLatency":    { zh: "最大视频延迟（秒）", en: "Max Video Latency (seconds)" },
+            "set.maxLatencyDesc":{ zh: "延迟超过此值则丢弃旧帧（0 = 不干预）", en: "Drop old frames if delay exceeds this (0 = no intervention)" },
+            "set.gpu":           { zh: "GPU 监控", en: "GPU Monitoring" },
+            "set.gpuInterval":   { zh: "图表刷新间隔（秒）", en: "Graph Update Interval (seconds)" },
+            "set.gpuIntervalDesc": { zh: "GPU/CPU 图表刷新频率（越小越灵敏，越大越省 CPU）", en: "How often to update GPU/CPU graphs (lower = more responsive, higher = less CPU usage)" },
+            "set.debug":         { zh: "调试", en: "Debug" },
+            "set.showReq":       { zh: "显示请求载荷", en: "Show request payload" },
+            "set.showReqDesc":   { zh: "在提示词下方显示请求 JSON（图像+提示词），默认折叠", en: "Include request JSON (image + prompt) under the prompt area; collapsed by default" },
+            "set.showResp":      { zh: "显示响应载荷", en: "Show response payload" },
+            "set.showRespDesc":  { zh: "在 VLM 输出下方显示响应 JSON，默认折叠", en: "Include API response JSON under the VLM output; collapsed by default" },
+            "theme.dark":        { zh: "深色", en: "Dark" },
+            "theme.light":       { zh: "浅色", en: "Light" },
+            "theme.auto":        { zh: "自动", en: "Auto" },
+        };
+        let lang = localStorage.getItem('lang') || 'zh';
+        function t(key) { const e = I18N[key]; return e ? (e[lang] != null ? e[lang] : e.en) : key; }
+        function applyI18n() {
+            document.documentElement.lang = lang;
+            document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+            document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+            document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+            const btn = document.getElementById('langToggle');
+            if (btn) btn.textContent = lang === 'zh' ? 'EN' : '中';
+        }
+        function toggleLang() {
+            lang = lang === 'zh' ? 'en' : 'zh';
+            localStorage.setItem('lang', lang);
+            applyI18n();
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', applyI18n);
+        } else {
+            applyI18n();
+        }
+    </script>
 </head>
 <body>
     <!-- Header -->
@@ -2007,12 +2089,13 @@ limitations under the License.
             </div>
             <div class="title-section">
                 <h1>OmniSight</h1>
-                <div class="subtitle">局域网多路视觉智能监控墙</div>
+                <div class="subtitle" data-i18n="hdr.subtitle">局域网多路视觉智能监控墙</div>
             </div>
         </div>
         <div class="header-right">
-            <a href="/wall" class="settings-btn" title="监控墙（多路同屏）" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;width:auto;padding:0 12px;">
-                <i data-lucide="layout-grid"></i> 监控墙
+            <button id="langToggle" class="settings-btn" title="中文 / English" onclick="toggleLang()" style="width:auto;padding:0 12px;">EN</button>
+            <a href="/wall" class="settings-btn" data-i18n-title="hdr.wallTitle" title="监控墙（多路同屏）" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;width:auto;padding:0 12px;">
+                <i data-lucide="layout-grid"></i> <span data-i18n="hdr.wall">监控墙</span>
             </a>
             <span class="status-badge disconnected" id="connectionStatus">Disconnected</span>
             <button class="settings-btn" id="settingsBtn" title="Settings">
@@ -2032,7 +2115,7 @@ limitations under the License.
         <div class="settings-dialog">
             <div class="settings-header">
                 <div class="settings-title">
-                    <i data-lucide="settings"></i> Settings
+                    <i data-lucide="settings"></i> <span data-i18n="set.title">Settings</span>
                 </div>
                 <button class="settings-close" id="settingsClose">×</button>
             </div>
@@ -2040,39 +2123,39 @@ limitations under the License.
                 <!-- Column 1: Layout & Visual Effects -->
                 <div>
                     <div class="settings-section">
-                        <div class="settings-section-title">Layout</div>
+                        <div class="settings-section-title" data-i18n="set.layout">Layout</div>
 
                         <div class="settings-item">
                             <div>
-                                <div class="settings-item-label">Main Content Order</div>
-                                <div class="settings-item-description">Choose which element appears at the top</div>
+                                <div class="settings-item-label" data-i18n="set.mainOrder">Main Content Order</div>
+                                <div class="settings-item-description" data-i18n="set.mainOrderDesc">Choose which element appears at the top</div>
                             </div>
                             <select id="layoutOrder" class="settings-select">
-                                <option value="video-first">Camera → VLM Output Info</option>
-                                <option value="vlm-first" selected>VLM Output Info → Camera</option>
+                                <option value="video-first" data-i18n="set.optCamFirst">Camera → VLM Output Info</option>
+                                <option value="vlm-first" selected data-i18n="set.optVlmFirst">VLM Output Info → Camera</option>
                             </select>
                         </div>
 
                         <div class="settings-item">
                             <div>
-                                <div class="settings-item-label">VLM Output on Camera View</div>
-                                <div class="settings-item-description">Show text overlay directly on video feed</div>
+                                <div class="settings-item-label" data-i18n="set.overlay">VLM Output on Camera View</div>
+                                <div class="settings-item-description" data-i18n="set.overlayDesc">Show text overlay directly on video feed</div>
                             </div>
                             <select id="overlayPosition" class="settings-select">
-                                <option value="none">None</option>
-                                <option value="top">At the top</option>
-                                <option value="bottom">At the bottom</option>
+                                <option value="none" data-i18n="set.optNone">None</option>
+                                <option value="top" data-i18n="set.optTop">At the top</option>
+                                <option value="bottom" data-i18n="set.optBottom">At the bottom</option>
                             </select>
                         </div>
                     </div>
 
                     <div class="settings-section">
-                        <div class="settings-section-title">Visual Effects</div>
+                        <div class="settings-section-title" data-i18n="set.visualEffects">Visual Effects</div>
 
                         <div class="settings-item">
                             <div>
-                                <div class="settings-item-label">Pop-in Animation</div>
-                                <div class="settings-item-description">Scale animation when new VLM response arrives</div>
+                                <div class="settings-item-label" data-i18n="set.popin">Pop-in Animation</div>
+                                <div class="settings-item-description" data-i18n="set.popinDesc">Scale animation when new VLM response arrives</div>
                             </div>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="popInToggle" checked>
@@ -2082,8 +2165,8 @@ limitations under the License.
 
                         <div class="settings-item">
                             <div>
-                                <div class="settings-item-label">Green Glow Effect</div>
-                                <div class="settings-item-description">Border glow on new VLM response</div>
+                                <div class="settings-item-label" data-i18n="set.glow">Green Glow Effect</div>
+                                <div class="settings-item-description" data-i18n="set.glowDesc">Border glow on new VLM response</div>
                             </div>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="glowToggle" checked>
@@ -2093,8 +2176,8 @@ limitations under the License.
 
                         <div class="settings-item">
                             <div>
-                                <div class="settings-item-label">Fade Effect</div>
-                                <div class="settings-item-description">Gradually fade response after 2 seconds</div>
+                                <div class="settings-item-label" data-i18n="set.fade">Fade Effect</div>
+                                <div class="settings-item-description" data-i18n="set.fadeDesc">Gradually fade response after 2 seconds</div>
                             </div>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="fadeToggle" checked>
@@ -2107,12 +2190,12 @@ limitations under the License.
                 <!-- Column 2: Input Colors & WebRTC -->
                 <div>
                     <div class="settings-section">
-                        <div class="settings-section-title">Visual Style</div>
+                        <div class="settings-section-title" data-i18n="set.visualStyle">Visual Style</div>
 
                         <div class="settings-item">
                             <div>
-                                <div class="settings-item-label">Colorful UI Accents</div>
-                                <div class="settings-item-description">Color-coded icons and input focus glows</div>
+                                <div class="settings-item-label" data-i18n="set.colorful">Colorful UI Accents</div>
+                                <div class="settings-item-description" data-i18n="set.colorfulDesc">Color-coded icons and input focus glows</div>
                             </div>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="colorfulFocusToggle">
@@ -2122,36 +2205,36 @@ limitations under the License.
                     </div>
 
                     <div class="settings-section">
-                        <div class="settings-section-title">WebRTC</div>
+                        <div class="settings-section-title" data-i18n="set.video">Video</div>
 
                         <div class="settings-item">
                             <div style="flex: 1; min-width: 0;">
-                                <div class="settings-item-label">Max Video Latency (seconds)</div>
-                                <div class="settings-item-description">Drop old frames if delay exceeds this (0 = no intervention)</div>
+                                <div class="settings-item-label" data-i18n="set.maxLatency">Max Video Latency (seconds)</div>
+                                <div class="settings-item-description" data-i18n="set.maxLatencyDesc">Drop old frames if delay exceeds this (0 = no intervention)</div>
                             </div>
                             <input type="number" id="maxLatency" value="0" min="0" max="10.0" step="0.1" style="width: 80px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); font-size: 14px;">
                         </div>
                     </div>
 
                     <div class="settings-section">
-                        <div class="settings-section-title">GPU Monitoring</div>
+                        <div class="settings-section-title" data-i18n="set.gpu">GPU Monitoring</div>
 
                         <div class="settings-item">
                             <div style="flex: 1; min-width: 0;">
-                                <div class="settings-item-label">Graph Update Interval (seconds)</div>
-                                <div class="settings-item-description">How often to update GPU/CPU graphs (lower = more responsive, higher = less CPU usage)</div>
+                                <div class="settings-item-label" data-i18n="set.gpuInterval">Graph Update Interval (seconds)</div>
+                                <div class="settings-item-description" data-i18n="set.gpuIntervalDesc">How often to update GPU/CPU graphs (lower = more responsive, higher = less CPU usage)</div>
                             </div>
                             <input type="number" id="gpuUpdateInterval" value="0.25" min="0.1" max="5.0" step="0.05" style="width: 80px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); font-size: 14px;">
                         </div>
                     </div>
 
                     <div class="settings-section">
-                        <div class="settings-section-title">Debug</div>
+                        <div class="settings-section-title" data-i18n="set.debug">Debug</div>
 
                         <div class="settings-item">
                             <div>
-                                <div class="settings-item-label">Show request payload</div>
-                                <div class="settings-item-description">Include request JSON (image + prompt) under the prompt area; collapsed by default</div>
+                                <div class="settings-item-label" data-i18n="set.showReq">Show request payload</div>
+                                <div class="settings-item-description" data-i18n="set.showReqDesc">Include request JSON (image + prompt) under the prompt area; collapsed by default</div>
                             </div>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="debugShowRequestPayload">
@@ -2161,8 +2244,8 @@ limitations under the License.
 
                         <div class="settings-item">
                             <div>
-                                <div class="settings-item-label">Show response payload</div>
-                                <div class="settings-item-description">Include API response JSON under the VLM output; collapsed by default</div>
+                                <div class="settings-item-label" data-i18n="set.showResp">Show response payload</div>
+                                <div class="settings-item-description" data-i18n="set.showRespDesc">Include API response JSON under the VLM output; collapsed by default</div>
                             </div>
                             <label class="toggle-switch">
                                 <input type="checkbox" id="debugShowResponsePayload">
@@ -2264,7 +2347,7 @@ limitations under the License.
                         <span class="panel-icon">
                             <i data-lucide="video"></i>
                         </span>
-                        Video Source
+                        <span data-i18n="src.title">Video Source</span>
                     </div>
                     <span class="panel-toggle" id="cameraConfigToggle">▼</span>
                 </div>
@@ -2277,7 +2360,7 @@ limitations under the License.
                         </button>
                         <button class="input-source-tab active" data-source="rtsp" title="RTSP / IP 摄像头 / 边缘设备（MJPEG）">
                             <i data-lucide="cast" style="width: 14px; height: 14px; margin-right: 4px;"></i>
-                            视频源
+                            <span data-i18n="src.tab">视频源</span>
                         </button>
                     </div>
 
@@ -2297,7 +2380,7 @@ limitations under the License.
                         <div class="form-group">
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 8px;">
                                 <div class="tooltip-wrapper" style="margin-bottom: 0; flex: 1;">
-                                    <label style="margin-bottom: 0;">RTSP Stream URL</label>
+                                    <label style="margin-bottom: 0;" data-i18n="src.rtspUrl">RTSP Stream URL</label>
                                     <span class="tooltip-icon">ℹ</span>
                                     <div class="tooltip-text">
                                         <strong>Format:</strong> rtsp://[user:pass@]ip:port/path<br><br>
@@ -2317,13 +2400,13 @@ limitations under the License.
                     <div class="form-group">
                         <!-- RTSP Beta Warning (shown only when RTSP tab is active) -->
                         <div id="rtspBetaWarning" class="input-hint" style="margin-top: 12px; color: var(--warning-color); display: none; align-items: center; gap: 4px;">
-                            <span><strong>Beta:</strong> RTSP/IP 摄像头为实验功能，部分型号可能不兼容。</span>
+                            <span><strong data-i18n="src.betaTag">Beta:</strong> <span data-i18n="src.betaMsg">RTSP/IP 摄像头为实验功能，部分型号可能不兼容。</span></span>
                         </div>
                     </div>
                     <div class="form-group" style="margin-bottom: 0;">
-                        <label>Frame Processing Interval</label>
+                        <label data-i18n="src.interval">Frame Processing Interval</label>
                         <input type="number" id="processEvery" value="30" min="1" max="3600" step="1">
-                        <div class="input-hint">Process every Nth frame (Lower = more frequent)</div>
+                        <div class="input-hint" data-i18n="src.intervalHint">Process every Nth frame (Lower = more frequent)</div>
                     </div>
                 </div>
             </div>
@@ -2335,13 +2418,13 @@ limitations under the License.
                         <span class="panel-icon">
                             <i data-lucide="edit-3"></i>
                         </span>
-                        Prompt Editor
+                        <span data-i18n="prompt.title">Prompt Editor</span>
                     </div>
                     <span class="panel-toggle" id="promptEditorToggle">▼</span>
                 </div>
                 <div class="panel-content" id="promptEditor">
                     <div class="form-group">
-                        <label>Quick Presets</label>
+                        <label data-i18n="prompt.presets">Quick Presets</label>
                         <select id="promptPreset">
                             <option value="">-- Select a preset --</option>
                             <option value="Describe what you see in this image in one sentence.">Scene Description</option>
@@ -2370,13 +2453,13 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Custom Prompt</label>
-                        <textarea id="promptText" placeholder="Enter your custom prompt here...">Describe what you see in this image in one sentence.</textarea>
+                        <label data-i18n="prompt.custom">Custom Prompt</label>
+                        <textarea id="promptText" data-i18n-ph="prompt.customPh" placeholder="Enter your custom prompt here...">Describe what you see in this image in one sentence.</textarea>
                     </div>
                     <div class="form-group">
-                        <label>Max Tokens</label>
+                        <label data-i18n="prompt.maxTokens">Max Tokens</label>
                         <input type="number" id="maxTokens" value="512" min="1" max="4096" step="1">
-                        <div class="input-hint">Lower for short answers (Yes/No: ~10), higher for detailed descriptions</div>
+                        <div class="input-hint" data-i18n="prompt.maxTokensHint">Lower for short answers (Yes/No: ~10), higher for detailed descriptions</div>
                     </div>
                 </div>
             </div>
@@ -2390,7 +2473,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                 <!-- Big Start Button (centered overlay) -->
                 <button id="bigStartBtn" class="big-start-btn" onclick="start()">
                     <i data-lucide="play"></i>
-                    Start
+                    <span data-i18n="btn.start">Start</span>
                 </button>
 
                 <!-- Small Stop Button (top-left corner when streaming) -->
@@ -2416,7 +2499,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                 <!-- Legacy controls (kept for mirror functionality) -->
                 <div class="video-controls" style="top: 64px;">
                     <button class="video-control-btn" id="mirrorBtn" title="Mirror video">
-                        <i data-lucide="flip-horizontal"></i> Mirror
+                        <i data-lucide="flip-horizontal"></i> <span data-i18n="btn.mirror">Mirror</span>
                     </button>
                 </div>
 
@@ -2430,10 +2513,10 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                 <div class="result-header">
                     <div class="result-header-left">
                         <div class="result-title">
-                            <i data-lucide="bot"></i> VLM Output Info
+                            <i data-lucide="bot"></i> <span data-i18n="out.title">VLM Output Info</span>
                         </div>
                         <div class="result-subtitle">
-                            Model: <span id="modelName" style="font-weight: 600; color: var(--accent-color);">--</span>
+                            <span data-i18n="out.model">Model:</span> <span id="modelName" style="font-weight: 600; color: var(--accent-color);">--</span>
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 16px;">
@@ -2485,7 +2568,7 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
             <div class="result-card" id="systemStatsCard">
                 <div class="result-header" style="display: flex; justify-content: space-between; align-items: center; gap: 20px;">
                     <div class="result-title">
-                        <i data-lucide="activity"></i> Local System Stats
+                        <i data-lucide="activity"></i> <span data-i18n="stats.title">Local System Stats</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--text-secondary); text-align: right; font-weight: 400; flex-shrink: 1; min-width: 0;">
                         <span id="systemInfoHeader" style="flex: 1;">Loading...</span>
@@ -2884,11 +2967,13 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
             if (theme === 'light') {
                 document.body.classList.add('light-theme');
                 themeIcon.innerHTML = '<i data-lucide="sun"></i>';
-                themeText.textContent = 'Light';
+                themeText.dataset.i18n = 'theme.light';
+                themeText.textContent = t('theme.light');
             } else if (theme === 'dark') {
                 document.body.classList.remove('light-theme');
                 themeIcon.innerHTML = '<i data-lucide="moon"></i>';
-                themeText.textContent = 'Dark';
+                themeText.dataset.i18n = 'theme.dark';
+                themeText.textContent = t('theme.dark');
             } else { // 'auto' - follow OS preference
                 const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
                 if (prefersLight) {
@@ -2898,7 +2983,8 @@ After commands, explain: obstacles detected, clearance margins, goal inference, 
                 }
                 // Always show monitor icon for AUTO mode
                 themeIcon.innerHTML = '<i data-lucide="monitor"></i>';
-                themeText.textContent = 'Auto';
+                themeText.dataset.i18n = 'theme.auto';
+                themeText.textContent = t('theme.auto');
             }
             lucide.createIcons();
 

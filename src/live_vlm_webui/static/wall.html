@@ -19,7 +19,7 @@ limitations under the License.
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OmniSight 监控墙</title>
+    <title data-i18n="wall.docTitle">OmniSight 监控墙</title>
     <style>
         :root {
             --bg: #0e0f12;
@@ -29,6 +29,16 @@ limitations under the License.
             --muted: #8b90a0;
             --accent: #76b900;
             --danger: #e5484d;
+        }
+        /* Light theme — follows the platform's localStorage 'theme' setting */
+        body.light {
+            --bg: #f4f6f8;
+            --panel: #ffffff;
+            --border: #e1e4ea;
+            --text: #1a1c22;
+            --muted: #6b7280;
+            --accent: #5e9400;
+            --danger: #d63a3f;
         }
         * { box-sizing: border-box; }
         body {
@@ -46,8 +56,12 @@ limitations under the License.
         header h1 .accent { color: var(--accent); }
         header .sub { color: var(--muted); font-size: 13px; }
         header .spacer { flex: 1; }
-        header a.single { color: var(--muted); font-size: 13px; text-decoration: none; border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; }
-        header a.single:hover { color: var(--text); }
+        header a.single, header button.lang {
+            color: var(--muted); font-size: 13px; text-decoration: none;
+            border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px;
+            background: transparent; cursor: pointer;
+        }
+        header a.single:hover, header button.lang:hover { color: var(--text); }
 
         .addbar {
             display: flex; gap: 8px; padding: 12px 20px; flex-wrap: wrap;
@@ -58,11 +72,11 @@ limitations under the License.
             padding: 8px 10px; border-radius: 6px; font-size: 14px;
         }
         .addbar input#camUrl { flex: 1; min-width: 260px; }
-        .addbar button {
+        .addbar button.add {
             background: var(--accent); color: #000; border: none; font-weight: 600;
             padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;
         }
-        .addbar button:hover { filter: brightness(1.1); }
+        .addbar button.add:hover { filter: brightness(1.1); }
         .addbar .hint { color: var(--muted); font-size: 12px; width: 100%; }
 
         #grid {
@@ -98,29 +112,134 @@ limitations under the License.
         }
         .cell .vlm .meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
         .empty { color: var(--muted); padding: 40px 20px; text-align: center; grid-column: 1 / -1; }
+
+        /* Offline (D-6) / paused (on-demand) overlays — text set via data-msg for i18n */
+        .cell.offline img { opacity: 0.3; filter: grayscale(0.7); }
+        .cell.offline .video-wrap::after,
+        .cell.paused .video-wrap::after {
+            content: attr(data-msg); position: absolute; inset: 0; display: flex;
+            align-items: center; justify-content: center; pointer-events: none;
+            font-size: 14px; letter-spacing: 1px;
+        }
+        .cell.offline .video-wrap::after { color: var(--danger); }
+        .cell.paused .video-wrap::after { color: var(--muted); }
     </style>
 </head>
 <body>
     <header>
-        <h1><span class="accent">OmniSight</span> 监控墙</h1>
-        <span class="sub" id="summary">0 路</span>
+        <h1><span class="accent">OmniSight</span> <span data-i18n="wall.titleSuffix">监控墙</span></h1>
+        <span class="sub" id="summary"></span>
         <span class="spacer"></span>
-        <a class="single" href="/">单路视图</a>
+        <button class="lang" id="themeToggle" onclick="cycleTheme()" title="主题 / Theme"></button>
+        <button class="lang" id="langToggle" onclick="toggleLang()">EN</button>
+        <a class="single" href="/" data-i18n="wall.singleView">单路视图</a>
     </header>
 
     <div class="addbar">
-        <input id="camId" placeholder="摄像头 ID (如 cam1)" size="14">
-        <input id="camUrl" placeholder="源地址 rtsp://… 或 http://host:8088/camera 或 local://dev">
-        <input id="camPrompt" placeholder="提示词(可选)" size="20">
-        <button onclick="addCamera()">添加摄像头</button>
-        <div class="hint">边缘设备(带检测框)请用 <code>/camera</code> 路径 + 同主机的 <code>/boxes</code> 自动叠框;框由浏览器绘制。</div>
+        <input id="camId" data-i18n-ph="wall.camIdPh" size="14">
+        <input id="camUrl" data-i18n-ph="wall.camUrlPh">
+        <input id="camPrompt" data-i18n-ph="wall.camPromptPh" size="20">
+        <button class="add" onclick="addCamera()" data-i18n="wall.addBtn">添加摄像头</button>
+        <div class="hint" data-i18n="wall.addHint">边缘设备(带检测框)请用 /camera 路径 + 同主机的 /boxes 自动叠框;框由浏览器绘制。</div>
     </div>
 
-    <div id="grid"><div class="empty" id="emptyMsg">还没有摄像头。在上方添加一路开始。</div></div>
+    <div id="grid"><div class="empty" id="emptyMsg" data-i18n="wall.empty">还没有摄像头。在上方添加一路开始。</div></div>
 
     <script>
-        const cells = {};      // camera_id -> { el, img, canvas, vlm, badge, boxTimer, boxesUrl }
+        // ── i18n ──────────────────────────────────────────────────────────────
+        const I18N = {
+            "wall.docTitle":   { zh: "OmniSight 监控墙", en: "OmniSight Wall" },
+            "wall.titleSuffix":{ zh: "监控墙", en: "Wall" },
+            "wall.singleView": { zh: "单路视图", en: "Single view" },
+            "wall.camIdPh":    { zh: "摄像头 ID (如 cam1)", en: "Camera ID (e.g. cam1)" },
+            "wall.camUrlPh":   { zh: "源地址 rtsp://… 或 http://host:8088/camera 或 local://dev",
+                                 en: "Source rtsp://… or http://host:8088/camera or local://dev" },
+            "wall.camPromptPh":{ zh: "提示词(可选)", en: "Prompt (optional)" },
+            "wall.addBtn":     { zh: "添加摄像头", en: "Add camera" },
+            "wall.addHint":    { zh: "边缘设备(带检测框)请用 /camera 路径 + 同主机的 /boxes 自动叠框;框由浏览器绘制。",
+                                 en: "For edge devices with detections, use the /camera path; boxes are auto-overlaid from /boxes on the same host (drawn in the browser)." },
+            "wall.empty":      { zh: "还没有摄像头。在上方添加一路开始。", en: "No cameras yet. Add one above to start." },
+            "wall.cams":       { zh: " 路", en: " cams" },
+            "wall.waiting":    { zh: "等待分析…", en: "Waiting for analysis…" },
+            "wall.offline":    { zh: "离线", en: "offline" },
+            "wall.reconnect":  { zh: "重连", en: "reconnecting" },
+            "wall.offlineOverlay": { zh: "离线", en: "OFFLINE" },
+            "wall.pausedOverlay":  { zh: "已暂停（滚动到此恢复）", en: "Paused (scroll here to resume)" },
+            "wall.confirmRemove":  { zh: "移除摄像头 ", en: "Remove camera " },
+            "wall.needFields": { zh: "请填写 摄像头 ID 和 源地址", en: "Please enter camera ID and source URL" },
+            "wall.addFailed":  { zh: "添加失败: ", en: "Add failed: " },
+            "wall.latency":    { zh: "延迟 ", en: "latency " },
+            "wall.totalRuns":  { zh: " 次", en: "" },
+            "wall.totalPrefix":{ zh: " · 共 ", en: " · " },
+            "wall.theme.auto": { zh: "自动", en: "Auto" },
+            "wall.theme.light":{ zh: "浅色", en: "Light" },
+            "wall.theme.dark": { zh: "深色", en: "Dark" },
+        };
+        let lang = localStorage.getItem('lang') || 'zh';
+        function t(key) { const e = I18N[key]; return e ? (e[lang] != null ? e[lang] : e.en) : key; }
+        function applyI18n() {
+            document.documentElement.lang = lang;
+            document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+            document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+            const btn = document.getElementById('langToggle');
+            if (btn) btn.textContent = lang === 'zh' ? 'EN' : '中';
+            // re-render dynamic bits
+            refreshDynamicText();
+        }
+        function toggleLang() {
+            lang = lang === 'zh' ? 'en' : 'zh';
+            localStorage.setItem('lang', lang);
+            applyI18n();
+        }
+
+        // ── theme: follow the platform's shared localStorage 'theme' (light/dark/auto) ──
+        function resolveAndApplyTheme() {
+            const saved = localStorage.getItem('theme') || 'auto';
+            let light;
+            if (saved === 'light') light = true;
+            else if (saved === 'dark') light = false;
+            else light = window.matchMedia('(prefers-color-scheme: light)').matches;
+            document.body.classList.toggle('light', light);
+            const tb = document.getElementById('themeToggle');
+            if (tb) tb.textContent = t('wall.theme.' + saved);
+        }
+        function cycleTheme() {
+            const order = ['auto', 'light', 'dark'];
+            const cur = localStorage.getItem('theme') || 'auto';
+            localStorage.setItem('theme', order[(order.indexOf(cur) + 1) % 3]);
+            resolveAndApplyTheme();
+        }
+        window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+            if ((localStorage.getItem('theme') || 'auto') === 'auto') resolveAndApplyTheme();
+        });
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'theme') resolveAndApplyTheme();
+            if (e.key === 'lang') { lang = localStorage.getItem('lang') || 'zh'; applyI18n(); }
+        });
+
+        function refreshDynamicText() {
+            // waiting placeholders + offline/paused overlays + summary
+            for (const id of Object.keys(cells)) {
+                const cell = cells[id];
+                const textEl = cell.vlm.querySelector('.text');
+                if (textEl && textEl.dataset.waiting === '1') textEl.textContent = t('wall.waiting');
+                if (cell.el.classList.contains('paused')) cell.wrap.dataset.msg = t('wall.pausedOverlay');
+                else if (cell.el.classList.contains('offline')) cell.wrap.dataset.msg = t('wall.offlineOverlay');
+            }
+            updateSummary(lastCount);
+            const tb = document.getElementById('themeToggle');
+            if (tb) tb.textContent = t('wall.theme.' + (localStorage.getItem('theme') || 'auto'));
+        }
+
+        // ── state ─────────────────────────────────────────────────────────────
+        const cells = {};      // camera_id -> { el, wrap, img, canvas, vlm, badge, boxTimer, boxesUrl, paused }
         let websocket = null;
+        let lastCount = 0;
+
+        function updateSummary(n) {
+            lastCount = n;
+            document.getElementById('summary').textContent = n + t('wall.cams');
+        }
 
         function deriveBoxesUrl(videoUrl) {
             try {
@@ -130,20 +249,22 @@ limitations under the License.
             } catch (e) { return null; }
         }
 
-        // ── WebSocket: receive per-camera VLM results (broadcast, tagged with camera_id) ──
+        // ── WebSocket: per-camera VLM results (broadcast, tagged camera_id) ──
         function connectWS() {
             const proto = location.protocol === 'https:' ? 'wss' : 'ws';
             websocket = new WebSocket(`${proto}://${location.host}/ws?session_id=wall`);
             websocket.onmessage = (ev) => {
-                let data;
-                try { data = JSON.parse(ev.data); } catch (e) { return; }
+                let data; try { data = JSON.parse(ev.data); } catch (e) { return; }
                 if (data.type === 'vlm_response' && data.camera_id && cells[data.camera_id]) {
                     const c = cells[data.camera_id];
-                    c.vlm.querySelector('.text').textContent = data.text || '';
+                    const textEl = c.vlm.querySelector('.text');
+                    textEl.dataset.waiting = '0';
+                    textEl.textContent = data.text || '';
                     if (data.metrics) {
                         const m = data.metrics;
                         c.vlm.querySelector('.meta').textContent =
-                            `延迟 ${Math.round(m.last_latency_ms || 0)}ms · 共 ${m.total_inferences || 0} 次`;
+                            t('wall.latency') + Math.round(m.last_latency_ms || 0) + 'ms'
+                            + t('wall.totalPrefix') + (m.total_inferences || 0) + t('wall.totalRuns');
                     }
                 }
             };
@@ -151,7 +272,7 @@ limitations under the License.
             websocket.onerror = () => { try { websocket.close(); } catch (e) {} };
         }
 
-        // ── Detection-box overlay per cell (poll the proxied /boxes, draw on canvas) ──
+        // ── detection-box overlay per cell ──
         function drawBoxes(cell, boxes) {
             const canvas = cell.canvas, img = cell.img;
             const wrapRect = canvas.getBoundingClientRect();
@@ -168,10 +289,8 @@ limitations under the License.
             const dw = nw * scale, dh = nh * scale;
             const ox = (ir.left - wrapRect.left) + (ir.width - dw) / 2;
             const oy = (ir.top - wrapRect.top) + (ir.height - dh) / 2;
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = 'rgba(118,185,0,0.95)';
-            ctx.font = '13px sans-serif';
-            ctx.textBaseline = 'top';
+            ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(118,185,0,0.95)';
+            ctx.font = '13px sans-serif'; ctx.textBaseline = 'top';
             for (const b of boxes) {
                 const x = ox + b.x * dw, y = oy + b.y * dh, w = b.w * dw, h = b.h * dh;
                 ctx.strokeRect(x, y, w, h);
@@ -180,13 +299,13 @@ limitations under the License.
                 const ly = Math.max(0, y - 17);
                 ctx.fillStyle = 'rgba(118,185,0,0.95)';
                 ctx.fillRect(x, ly, tw + 8, 17);
-                ctx.fillStyle = '#000';
-                ctx.fillText(label, x + 4, ly + 2);
+                ctx.fillStyle = '#000'; ctx.fillText(label, x + 4, ly + 2);
             }
         }
 
         function startBoxPoll(cell) {
             if (!cell.boxesUrl) return;
+            if (cell.boxTimer) clearInterval(cell.boxTimer);
             const poll = async () => {
                 try {
                     const resp = await fetch('/api/boxes?url=' + encodeURIComponent(cell.boxesUrl));
@@ -198,33 +317,61 @@ limitations under the License.
             cell.boxTimer = setInterval(poll, 120);
         }
 
+        // ── on-demand subscription: pause off-screen cells ──
+        const cellObserver = new IntersectionObserver((entries) => {
+            for (const e of entries) {
+                const cell = cells[e.target.dataset.cameraId];
+                if (!cell) continue;
+                if (e.isIntersecting) resumeCell(cell, e.target.dataset.cameraId);
+                else pauseCell(cell);
+            }
+        }, { rootMargin: '120px' });
+
+        function pauseCell(cell) {
+            if (cell.paused) return;
+            cell.paused = true;
+            cell.el.classList.add('paused');
+            cell.wrap.dataset.msg = t('wall.pausedOverlay');
+            if (cell.boxTimer) { clearInterval(cell.boxTimer); cell.boxTimer = null; }
+            cell.img.removeAttribute('src');
+        }
+        function resumeCell(cell, id) {
+            if (!cell.paused) return;
+            cell.paused = false;
+            cell.el.classList.remove('paused');
+            cell.img.src = '/stream?camera_id=' + encodeURIComponent(id);
+            startBoxPoll(cell);
+        }
+
         function createCell(cam) {
             const el = document.createElement('div');
             el.className = 'cell';
             el.innerHTML = `
                 <div class="badge"><span class="dot"></span><span class="label"></span></div>
-                <button class="remove" title="移除">✕</button>
-                <div class="video-wrap">
-                    <img alt="${cam.camera_id}">
-                    <canvas></canvas>
-                </div>
-                <div class="vlm"><div class="text">等待分析…</div><div class="meta"></div></div>
+                <button class="remove" title="✕">✕</button>
+                <div class="video-wrap"><img alt="${cam.camera_id}"><canvas></canvas></div>
+                <div class="vlm"><div class="text" data-waiting="1"></div><div class="meta"></div></div>
             `;
             const cell = {
                 el,
+                wrap: el.querySelector('.video-wrap'),
                 img: el.querySelector('img'),
                 canvas: el.querySelector('canvas'),
                 vlm: el.querySelector('.vlm'),
                 badge: el.querySelector('.badge'),
                 boxesUrl: deriveBoxesUrl(cam.url),
                 boxTimer: null,
+                paused: false,
             };
+            el.dataset.cameraId = cam.camera_id;
             el.querySelector('.badge .label').textContent = cam.camera_id;
+            el.querySelector('.text').textContent = t('wall.waiting');
             el.querySelector('.remove').onclick = () => removeCamera(cam.camera_id);
             cell.img.src = '/stream?camera_id=' + encodeURIComponent(cam.camera_id);
             cells[cam.camera_id] = cell;
             document.getElementById('grid').appendChild(el);
             startBoxPoll(cell);
+            cellObserver.observe(el);
             return cell;
         }
 
@@ -233,35 +380,31 @@ limitations under the License.
             if (!cell) return;
             const online = cam.connected && (cam.last_frame_age == null || cam.last_frame_age < 5);
             cell.badge.className = 'badge ' + (online ? 'online' : 'offline');
-            const extra = online ? '' : (cam.reconnects ? ` · 重连 ${cam.reconnects}` : ' · 离线');
+            cell.el.classList.toggle('offline', !online);
+            if (!online) {
+                const ctx = cell.canvas.getContext('2d');
+                if (ctx) ctx.clearRect(0, 0, cell.canvas.width, cell.canvas.height);
+                if (!cell.el.classList.contains('paused')) cell.wrap.dataset.msg = t('wall.offlineOverlay');
+            }
+            const extra = online ? '' : (cam.reconnects ? ` · ${t('wall.reconnect')} ${cam.reconnects}` : ` · ${t('wall.offline')}`);
             cell.badge.querySelector('.label').textContent = cam.camera_id + extra;
         }
 
         async function loadCameras() {
             let list = [];
-            try {
-                const resp = await fetch('/api/cameras');
-                list = (await resp.json()).cameras || [];
-            } catch (e) { return; }
-
+            try { list = (await (await fetch('/api/cameras')).json()).cameras || []; } catch (e) { return; }
             const ids = new Set(list.map(c => c.camera_id));
-            // remove cells for cameras that no longer exist
-            for (const id of Object.keys(cells)) {
-                if (!ids.has(id)) destroyCell(id);
-            }
-            // add/update
-            for (const cam of list) {
-                if (!cells[cam.camera_id]) createCell(cam);
-                updateBadge(cam);
-            }
+            for (const id of Object.keys(cells)) if (!ids.has(id)) destroyCell(id);
+            for (const cam of list) { if (!cells[cam.camera_id]) createCell(cam); updateBadge(cam); }
             document.getElementById('emptyMsg').style.display = list.length ? 'none' : 'block';
-            document.getElementById('summary').textContent = list.length + ' 路';
+            updateSummary(list.length);
         }
 
         function destroyCell(id) {
             const cell = cells[id];
             if (!cell) return;
             if (cell.boxTimer) clearInterval(cell.boxTimer);
+            cellObserver.unobserve(cell.el);
             cell.img.src = '';
             cell.el.remove();
             delete cells[id];
@@ -271,32 +414,32 @@ limitations under the License.
             const camera_id = document.getElementById('camId').value.trim();
             const url = document.getElementById('camUrl').value.trim();
             const prompt = document.getElementById('camPrompt').value.trim();
-            if (!camera_id || !url) { alert('请填写 摄像头 ID 和 源地址'); return; }
+            if (!camera_id || !url) { alert(t('wall.needFields')); return; }
             try {
-                const resp = await fetch('/api/cameras', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                const data = await (await fetch('/api/cameras', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ camera_id, url, prompt: prompt || undefined }),
-                });
-                const data = await resp.json();
-                if (data.error) { alert('添加失败: ' + data.error); return; }
+                })).json();
+                if (data.error) { alert(t('wall.addFailed') + data.error); return; }
                 document.getElementById('camId').value = '';
                 document.getElementById('camUrl').value = '';
                 document.getElementById('camPrompt').value = '';
                 loadCameras();
-            } catch (e) { alert('添加失败: ' + e.message); }
+            } catch (e) { alert(t('wall.addFailed') + e.message); }
         }
 
         async function removeCamera(id) {
-            if (!confirm('移除摄像头 ' + id + '?')) return;
+            if (!confirm(t('wall.confirmRemove') + id + ' ?')) return;
             try { await fetch('/api/cameras/' + encodeURIComponent(id), { method: 'DELETE' }); } catch (e) {}
             destroyCell(id);
             loadCameras();
         }
 
+        applyI18n();
+        resolveAndApplyTheme();
         connectWS();
         loadCameras();
-        setInterval(loadCameras, 3000);  // refresh status / pick up cameras added elsewhere
+        setInterval(loadCameras, 3000);
     </script>
 </body>
 </html>
