@@ -2,6 +2,8 @@
 
 > **适用版本**：基于 `live-vlm-webui` 0.4.0
 > **更新**：2026-06-11 —— 补入"已落地的运行基线"与"现有边缘设备实测"，据实修订检测框落地策略（新增「框已烧进像素」现实模式），新增 §5.8 视频编码/压缩选型（结论：当前 MJPEG 即可，Orin NX 上换 H.264 不划算），并新增 §10 界面品牌化（去 NVIDIA → 项目名 **OmniSight / 全视**）。
+> **更新**：2026-06-15 —— **方案主体已全部实施并提交**（品牌化 + Phase 1 去 WebRTC + Phase 2 CameraManager + Phase 3 InferencePool + Phase 4 监控墙 `/wall` + Phase 5 检测框 Mode A-lite）。详见 §6 路线图"实施状态"。剩 Phase 6 优化（WS 二进制/按需订阅/strict frame_id 对齐）为可选。
+> **更新**：2026-06-16 —— 新增 §11 界面与体验：中英语言切换（i18n，含设置弹窗、过时 "WebRTC" 分组改名"视频"）、监控墙主题跟随平台、检测框抖动成因与对策（设备 YOLO 逐帧抖动；`/boxes` 已就绪，Mode A 前端防抖待加）。
 
 ---
 
@@ -337,21 +339,39 @@ cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75, cv2.IMWRITE_JPEG_OPTIMI
 
 ---
 
-## 6. 分期路线图
+## 6. 分期路线图（实施状态）
 
-| 阶段 | 目标 | 关键产出 | 风险 |
+> **总体：主体已全部完成并提交（2026-06-15）。** 下表"状态"列记录实际落地情况；
+> "实现说明"记录与原设想不同之处（功能等价、实现更简）。
+
+| 阶段 | 目标 | 实际产出 | 状态 |
 |------|------|----------|------|
-| **Phase 1 移除 WebRTC** | MJPEG 替代回传 + 删除上行 | `/stream/{camera_id}` MJPEG；删硬编码 TURN；移除 `offer()`/aiortc 依赖/前端 WebRTC JS（D-4） | 低；**收益最高（解决 SETUP_NOTES 80% 痛点）** |
-| **Phase 2 多路采集** | N 路 RTSP 并行 | `CameraSource` / `CameraManager` / `LatestFrameBuffer`；独立重连 | 中；并发与资源管理 |
-| **Phase 3 分析池限流** | 防后端雪崩 | `InferencePool` + 全局信号量 + 每路背压 | 中；需压测后端并发上限 |
-| **Phase 4 WS 多路复用 + 同屏前端** | 监控墙 UI | 网格布局；一条 WS 承载多路视频+结果+控制；`frame_id` 入帧；订阅机制 | 中；前端 canvas 渲染 N 路性能 |
-| **Phase 5a 烧框源直接上屏** | 现有 `/yolo` 设备进网格 | 把烧框 MJPEG 当普通 MJPEG 源接入（Mode 0）；框天然在画面、无叠框层、无对齐 | **低；今天即可，验证端到端** |
-| **Phase 5b 检测框分离叠加** | 框可交互的目标态 | 推动设备旁路 `{frame_id, boxes}`；`EdgeSource` + `MetadataChannel`；`detections` 消息；前端透明 canvas 叠框层；`frame_id` 帧级对齐 | 中；依赖 Phase 4 的 `frame_id` 通道 + 设备配合 |
-| **Phase 6（可选）优化** | 带宽/CPU | WS 二进制帧、硬件 JPEG 编码、按需订阅、动态降频 | 低；增量优化 |
+| **Phase 1 移除 WebRTC** | MJPEG 替代回传 + 删上行 | `GET /stream?rtsp_url=` MJPEG;删硬编码 TURN;移除 `offer()`/aiortc/前端 WebRTC（D-4 浏览器摄像头停用）;SSL 改为非强制（无证书回退 HTTP） | ✅ **完成**（1.1–1.4） |
+| **Phase 2 多路采集** | N 路并行 | `camera_manager.py`：`Camera`（单源 + 最新帧缓冲 + 指数退避重连）+ `CameraManager` 全局注册表 | ✅ **完成** |
+| **Phase 3 分析池限流** | 防后端雪崩 | `VLMService` 共享全局 `inference_semaphore`（池满丢帧不排队）；`LIVE_VLM_MAX_CONCURRENCY` 默认 2 | ✅ **完成**（D-3 取值待压测调优） |
+| **Phase 4 监控墙同屏前端** | 监控墙 UI | 独立页 `/wall` 响应式网格;每格 `<img src=/stream?camera_id>` + canvas 叠框 + 在线徽章;`/api/cameras` 增删查 | ✅ **完成** |
+| **Phase 5 检测框叠加** | 框可交互 | 设备 `/boxes`（归一化坐标）+ 服务端 `/api/boxes` 代理 + 浏览器透明 canvas 叠框（Mode A-lite，最新框近似对齐） | ✅ **完成**（lite） |
+| **Phase 6（可选）优化** | 带宽/CPU/精度 | ✅ 按需订阅(IntersectionObserver 暂停离屏格子) + D-6 离线降级(`last_frame_age` 判离线、变灰标记、清残留框);⏳ WS 二进制帧 / 硬件编码 / strict `frame_id` 对齐**有意不做** | 🟡 **部分完成** |
 
-> **建议先做 Phase 1**：风险最低、收益最快，且立即移除当前最大的不稳定源（WebRTC + 硬编码 TURN）。
-> **Phase 5a（烧框源直接上屏）不依赖任何对齐通道**，现有 `/yolo` 设备在 Phase 2 多路采集打通后即可显示，可作为最早的端到端验证。
-> **Phase 5b（框分离叠加）依赖 Phase 4 打通的 `frame_id` 入帧通道**——所以视频回传务必直接走带 `frame_id` 的 WS-JPEG，而非 HTTP-MJPEG，否则对齐要返工。
+### 实现与原设想的差异（如实记录）
+
+- **视频回传走"每格 MJPEG"而非"单条 WS 多路复用"**：每个网格格子用独立的 `<img src=/stream?camera_id=…>`（MJPEG），VLM 文字结果经 WebSocket 按 `camera_id` 广播,检测框经 HTTP 轮询 `/api/boxes`。功能等价、实现更简、`<img>` 原生支持 multipart。真要省带宽/做帧级严格对齐时,再按 Phase 6 切到 WS-JPEG 多路复用。
+- **检测框是 Mode A-lite**（分离通道 + "最新框盖最新画面"近似对齐），非 strict `frame_id` 帧级对齐。监控场景肉眼基本无差；strict 对齐属 Phase 6。
+- **多用户共享（D-1）已落地**：`/stream?camera_id` 从共享缓冲读,N 个观看者只开 1 个源、VLM 只跑 1 份（已验证：2 观看者→源仅打开 1 次）。
+- 监控墙为独立页 `/wall`;原单路视图 `/` 保留可用。
+- **Phase 6 取舍**:做了「按需订阅」(离屏格子暂停拉流)和「D-6 离线降级」(帧龄判离线、变灰、清残留框);**有意不做** WS 二进制帧、硬件编码(Orin NX 无可用 NVENC)、检测框 strict `frame_id` 对齐——对当前"局域网 + 少量摄像头 + 亚秒延迟"场景边际收益低、工程成本高,留作将来扩规模时再上。
+
+### 关键路由/文件落点
+
+| 能力 | 落点 |
+|------|------|
+| 共享摄像头注册表 | `camera_manager.py`（`Camera` / `CameraManager`） |
+| 加/删/查摄像头 | `POST/DELETE/GET /api/cameras` |
+| 共享视频流 | `GET /stream?camera_id=<id>`（单路 ad-hoc：`?rtsp_url=`） |
+| 检测框代理 | `GET /api/boxes?url=<device>/boxes` |
+| 推理限流 | `get_inference_semaphore()` + `VLMService.inference_semaphore` |
+| 监控墙 UI | `static/wall.html`（路由 `/wall`） |
+| 边缘设备框输出 | 设备侧 `/boxes`（`astra_camera_streamer.py`，独立交付件，不在本仓库） |
 
 ---
 
@@ -372,12 +392,12 @@ cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75, cv2.IMWRITE_JPEG_OPTIMI
 |------|------|------|
 | ~~D-1~~ | `CameraManager` 全局共享 vs 按会话隔离 | ✅ **全局共享**：多用户看同一批摄像头，VLM 结果按 `camera_id` 共享 |
 | ~~D-2~~ | 视频回传 HTTP-MJPEG vs WS-JPEG | ✅ **WS-JPEG**：检测框对齐硬需求 |
-| **D-3** | `max_concurrency` 取值 | ⏳ **待定**：需对后端 VLM 压测确定并发上限 |
+| ~~D-3~~ | `max_concurrency` 取值 | ✅ **机制已实现**（全局信号量,`LIVE_VLM_MAX_CONCURRENCY` 默认 2);**具体取值仍需对后端压测调优** |
 | ~~D-4~~ | 浏览器摄像头源是否仍需支持 | ✅ **不支持**：视频源收敛为 RTSP/本地/边缘，aiortc/WebRTC 整体移除 |
 | ~~D-5~~ | 边缘设备元数据通道形态 | ✅ **目标态分开传输**（选项 A）：视频帧与检测框两条消息，同源 `frame_id`。**现状**：手上 `/yolo` 设备是 Mode 0（框已烧进像素、无元数据通道），先以 Mode 0 上屏，再演进到 A（§2.5 / §5.4） |
 | ~~D-6~~ | 检测离线/框丢失时前端策略 | ✅ **留空 + 标记离线**：不冻结错误框 |
 
-> 仅剩 **D-3（`max_concurrency`）** 待定，且依赖实际后端压测，可在 Phase 3 实现时确定。
+> 全部决策已落地。**D-3 的限流机制已实现**（Phase 3）,只余"具体并发数"需按实际后端压测微调（改 `.env` 的 `LIVE_VLM_MAX_CONCURRENCY`）。
 
 ---
 
@@ -444,3 +464,32 @@ cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75, cv2.IMWRITE_JPEG_OPTIMI
 - [ ] 源码各文件头部 NVIDIA 版权 + Apache-2.0 SPDX 行**完整保留**（`git grep -c "NVIDIA CORPORATION" src/` 不减少），仅在其旁追加本项目版权。
 - [ ] NVIDIA API 作为后端**仍可正常工作**（去品牌 ≠ 去功能）。
 - [ ] 面向用户的 "NVIDIA API Catalog" 字样已中性化或随隐藏面板不可见。
+
+---
+
+## 11. 界面与体验（i18n / 主题 / 检测框）
+
+> 2026-06-16 追加。记录品牌化之后的界面一致性改动与检测框抖动的成因/对策。
+
+### 11.1 多语言切换（i18n）
+
+- **机制**：`data-i18n` / `data-i18n-ph`（placeholder）/ `data-i18n-title`（title）标注 + 字典 `I18N{key:{zh,en}}` + `applyI18n()`；右上角切换按钮（中文显示 `EN`、英文显示 `中`）。
+- **默认中文**，选择存 `localStorage['lang']`，`/` 与 `/wall` **共享同一键**（切一次两页同步；跨标签经 `storage` 事件实时同步）。
+- **覆盖范围**：`/` 单路视图主界面 + **设置弹窗全部**（含把过时分组 **"WebRTC" 改名为"视频"**，因 WebRTC 已移除）+ 主题按钮文字；`/wall` 监控墙整页。
+- **暂未覆盖（已知）**：JS 运行时动态文案（连接状态 `Disconnected/Streaming`、部分 `updateStatus`/`alert`）、快捷预设下拉的选项名（其值即英文提示词本身）。
+
+### 11.2 主题跟随（监控墙与平台一致）
+
+- 平台主题存 `localStorage['theme']`（`light`/`dark`/`auto`，默认 auto 跟随系统）；单路视图用 `body.light-theme`。
+- **`/wall` 监控墙读取同一 `theme` 键**应用浅/深色（`body.light`），并自带主题循环钮（`自动→浅色→深色`，写同一键）；跨标签经 `storage` 事件、`auto` 经 `prefers-color-scheme` 实时跟随。解决了"平台浅色、监控墙深色"的不一致。
+
+### 11.3 检测框抖动：成因与对策
+
+现象：`/yolo` 源画面里的检测框不断跳动。
+
+- **成因**：该路是 **Mode 0（框烧进像素）**——边缘设备 YOLO **逐帧独立检测、无时序平滑/跟踪**，坐标与置信度每帧抖动；且检测帧率（设备每 ~3 帧一次）低于视频帧率，框"保持几帧再跳"。框与画面一起编码传输，OmniSight 只是原样显示，**改不了**。
+- **对策（二选一）**：
+  - **设备端（治本）**：YOLO 改用跟踪 `model.track(persist=True, tracker="bytetrack.yaml")` 或对坐标做 EMA 平滑后再 `plot()`；提高/稳定推理帧率。
+  - **改走 Mode A**：源换 `/camera`（干净）+ `/boxes`（坐标数据），框由浏览器 canvas 画 → 可在前端加 **EMA 防抖**、可开关。
+- **边缘设备 `/boxes` 已就绪**：`astra_camera_streamer.py` 已新增 `/boxes`（输出归一化框坐标，改动以 `# OmniSight 新增` 注释标记；`/camera`、`/yolo` 行为不变）。
+- **待办**：Mode A 前端叠框的 **EMA 平滑/防抖尚未实现**（待选定路线后加）。

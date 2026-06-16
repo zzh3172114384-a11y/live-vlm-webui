@@ -7,6 +7,12 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/nvidia-ai-iot/live-vlm-webui/blob/main/LICENSE)
 [![GHCR Image Tags](https://ghcr-badge.egpl.dev/nvidia-ai-iot/live-vlm-webui/tags)](https://github.com/nvidia-ai-iot/live-vlm-webui/pkgs/container/live-vlm-webui)
 
+> ℹ️ **本仓库是 OmniSight（全视）** —— 基于 NVIDIA `live-vlm-webui` 的 fork，已改造为**局域网多路视觉智能监控墙**：视频回传改用 **MJPEG（去 WebRTC）**，新增多路监控墙 `/wall`、共享摄像头、推理限流、检测框叠加、中英切换。
+> **启动与 `.env` 配置见 [`QUICKSTART.md`](QUICKSTART.md)；改造方案见 [`MULTI_SOURCE_STREAMING_PLAN.md`](MULTI_SOURCE_STREAMING_PLAN.md)。**
+> 下方为上游原始 README（部分内容仍描述 WebRTC/webcam 旧形态，仅供参考）。
+
+---
+
 **A universal web interface for real-time Vision Language Model interaction and benchmarking.**
 
 Stream your webcam to any VLM and get live AI-powered analysis - perfect for testing models, benchmarking performance, and exploring vision AI capabilities across multiple domains and hardware platforms.

@@ -1,6 +1,14 @@
 # Project Setup & Fixes Summary
 # Live VLM WebUI - WSL2 Environment
 
+> ⚠️ **已废弃（2026-06-16）。本文件描述的 WSL2 + WebRTC + TURN/coturn 方案不再适用。**
+> - **WebRTC 已整体移除**：视频回传改为 **MJPEG**（`/stream`），不再需要 STUN/TURN/coturn，也没有硬编码 TURN IP。下面所有关于 ICE/TURN/coturn/WSL IP 的步骤**作废**。
+> - **当前运行环境是原生 Windows + PowerShell**（非 WSL），配置从项目根 `.env` 读取（`live-vlm-webui` 直接启动）。Clash 代理用 `.env` 的 `NO_PROXY` 隔离局域网。
+> - 当前架构与本地环境以 **`CLAUDE.md`** 为准；多源监控墙方案见 **`MULTI_SOURCE_STREAMING_PLAN.md`**。
+> - 仍然有效的只有：`RTSPVideoTrack.stop()` 与读取线程竞争的 **use-after-free segfault → `threading.Lock`** 修复（见下文）。
+>
+> 以下内容仅作历史归档保留。
+
 ## Environment
 
 - **OS**: Windows 11 + WSL2 (Ubuntu 24.04), default NAT mode
