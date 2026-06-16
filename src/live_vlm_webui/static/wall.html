@@ -77,6 +77,11 @@ limitations under the License.
             padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;
         }
         .addbar button.add:hover { filter: brightness(1.1); }
+        .addbar button.tool {
+            background: transparent; color: var(--text); border: 1px solid var(--border);
+            padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 14px;
+        }
+        .addbar button.tool:hover { border-color: var(--danger); color: var(--danger); }
         .addbar .hint { color: var(--muted); font-size: 12px; width: 100%; }
 
         #grid {
@@ -111,6 +116,11 @@ limitations under the License.
             color: var(--text); max-height: 96px; overflow: auto;
         }
         .cell .vlm .meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+        .cell .vlm .src {
+            color: var(--muted); font-size: 11px; margin-bottom: 4px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .cell .vlm .src b { color: var(--text); }
         .empty { color: var(--muted); padding: 40px 20px; text-align: center; grid-column: 1 / -1; }
 
         /* Offline (D-6) / paused (on-demand) overlays — text set via data-msg for i18n */
@@ -140,6 +150,8 @@ limitations under the License.
         <input id="camUrl" data-i18n-ph="wall.camUrlPh">
         <input id="camPrompt" data-i18n-ph="wall.camPromptPh" size="20">
         <button class="add" onclick="addCamera()" data-i18n="wall.addBtn">添加摄像头</button>
+        <button class="tool" onclick="removeOffline()" data-i18n="wall.removeOffline">移除离线</button>
+        <button class="tool" onclick="removeDuplicates()" data-i18n="wall.removeDup">去重</button>
         <div class="hint" data-i18n="wall.addHint">边缘设备(带检测框)请用 /camera 路径 + 同主机的 /boxes 自动叠框;框由浏览器绘制。</div>
     </div>
 
@@ -168,6 +180,14 @@ limitations under the License.
             "wall.confirmRemove":  { zh: "移除摄像头 ", en: "Remove camera " },
             "wall.needFields": { zh: "请填写 摄像头 ID 和 源地址", en: "Please enter camera ID and source URL" },
             "wall.addFailed":  { zh: "添加失败: ", en: "Add failed: " },
+            "wall.dupWarnA":   { zh: "该源地址已被摄像头「", en: "This source is already used by camera \"" },
+            "wall.dupWarnB":   { zh: "」使用。\n\n多人/多处观看同一路：直接多开本页即可（共享同一源连接、不增加设备负载），无需重复添加。\n\n仍要继续添加吗？",
+                                 en: "\".\n\nTo watch one camera from multiple places, just open this page in more tabs — they share the one source connection (no extra device load); no need to add it again.\n\nAdd it anyway?" },
+            "wall.removeOffline":{ zh: "移除离线", en: "Remove offline" },
+            "wall.removeDup":  { zh: "去重", en: "Dedupe" },
+            "wall.noneToRemove":{ zh: "没有可移除的摄像头", en: "No cameras to remove" },
+            "wall.confirmRemoveOffline": { zh: "移除以下离线摄像头？\n", en: "Remove these offline cameras?\n" },
+            "wall.confirmRemoveDup":     { zh: "移除以下重复源摄像头（每个源保留一路）？\n", en: "Remove these duplicate-source cameras (keep one per source)?\n" },
             "wall.latency":    { zh: "延迟 ", en: "latency " },
             "wall.totalRuns":  { zh: " 次", en: "" },
             "wall.totalPrefix":{ zh: " · 共 ", en: " · " },
@@ -327,20 +347,31 @@ limitations under the License.
             }
         }, { rootMargin: '120px' });
 
+        // 是否拉流 = 在线 && 可见。离线/离屏都释放 /stream 连接（省浏览器每域名 ~6 连接的名额）。
+        function refreshStream(cell, id) {
+            const on = cell.online !== false && !cell.paused;
+            if (on) {
+                if (!cell.img.getAttribute('src')) {
+                    cell.img.src = '/stream?camera_id=' + encodeURIComponent(id);
+                    startBoxPoll(cell);
+                }
+            } else {
+                if (cell.boxTimer) { clearInterval(cell.boxTimer); cell.boxTimer = null; }
+                cell.img.removeAttribute('src');
+            }
+        }
         function pauseCell(cell) {
             if (cell.paused) return;
             cell.paused = true;
             cell.el.classList.add('paused');
             cell.wrap.dataset.msg = t('wall.pausedOverlay');
-            if (cell.boxTimer) { clearInterval(cell.boxTimer); cell.boxTimer = null; }
-            cell.img.removeAttribute('src');
+            refreshStream(cell, cell.el.dataset.cameraId);
         }
         function resumeCell(cell, id) {
             if (!cell.paused) return;
             cell.paused = false;
             cell.el.classList.remove('paused');
-            cell.img.src = '/stream?camera_id=' + encodeURIComponent(id);
-            startBoxPoll(cell);
+            refreshStream(cell, id);
         }
 
         function createCell(cam) {
@@ -350,7 +381,7 @@ limitations under the License.
                 <div class="badge"><span class="dot"></span><span class="label"></span></div>
                 <button class="remove" title="✕">✕</button>
                 <div class="video-wrap"><img alt="${cam.camera_id}"><canvas></canvas></div>
-                <div class="vlm"><div class="text" data-waiting="1"></div><div class="meta"></div></div>
+                <div class="vlm"><div class="src"><b class="cid"></b> · <span class="curl"></span></div><div class="text" data-waiting="1"></div><div class="meta"></div></div>
             `;
             const cell = {
                 el,
@@ -359,18 +390,21 @@ limitations under the License.
                 canvas: el.querySelector('canvas'),
                 vlm: el.querySelector('.vlm'),
                 badge: el.querySelector('.badge'),
+                url: cam.url,
                 boxesUrl: deriveBoxesUrl(cam.url),
                 boxTimer: null,
                 paused: false,
             };
             el.dataset.cameraId = cam.camera_id;
             el.querySelector('.badge .label').textContent = cam.camera_id;
+            el.querySelector('.cid').textContent = cam.camera_id;
+            el.querySelector('.curl').textContent = cam.url;
+            el.querySelector('.src').title = cam.camera_id + ' · ' + cam.url;
             el.querySelector('.text').textContent = t('wall.waiting');
             el.querySelector('.remove').onclick = () => removeCamera(cam.camera_id);
-            cell.img.src = '/stream?camera_id=' + encodeURIComponent(cam.camera_id);
             cells[cam.camera_id] = cell;
             document.getElementById('grid').appendChild(el);
-            startBoxPoll(cell);
+            refreshStream(cell, cam.camera_id);   // 初始即拉流；后续按在线/可见态自动增减
             cellObserver.observe(el);
             return cell;
         }
@@ -379,6 +413,7 @@ limitations under the License.
             const cell = cells[cam.camera_id];
             if (!cell) return;
             const online = cam.connected && (cam.last_frame_age == null || cam.last_frame_age < 5);
+            cell.online = online;
             cell.badge.className = 'badge ' + (online ? 'online' : 'offline');
             cell.el.classList.toggle('offline', !online);
             if (!online) {
@@ -388,6 +423,7 @@ limitations under the License.
             }
             const extra = online ? '' : (cam.reconnects ? ` · ${t('wall.reconnect')} ${cam.reconnects}` : ` · ${t('wall.offline')}`);
             cell.badge.querySelector('.label').textContent = cam.camera_id + extra;
+            refreshStream(cell, cam.camera_id);   // 离线→释放连接；恢复在线→重新拉流
         }
 
         async function loadCameras() {
@@ -415,6 +451,9 @@ limitations under the License.
             const url = document.getElementById('camUrl').value.trim();
             const prompt = document.getElementById('camPrompt').value.trim();
             if (!camera_id || !url) { alert(t('wall.needFields')); return; }
+            // 同源已存在 → 提示：多人观看应多开网页（共享连接），而非重复添加
+            const dupId = Object.keys(cells).find(id => cells[id].url === url);
+            if (dupId && !confirm(t('wall.dupWarnA') + dupId + t('wall.dupWarnB'))) return;
             try {
                 const data = await (await fetch('/api/cameras', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -433,6 +472,34 @@ limitations under the License.
             try { await fetch('/api/cameras/' + encodeURIComponent(id), { method: 'DELETE' }); } catch (e) {}
             destroyCell(id);
             loadCameras();
+        }
+
+        // 批量移除：一次确认、逐个 DELETE
+        async function removeMany(ids, confirmKey) {
+            if (!ids.length) { alert(t('wall.noneToRemove')); return; }
+            if (!confirm(t(confirmKey) + ids.join(', '))) return;
+            for (const id of ids) {
+                try { await fetch('/api/cameras/' + encodeURIComponent(id), { method: 'DELETE' }); } catch (e) {}
+                destroyCell(id);
+            }
+            loadCameras();
+        }
+        function removeOffline() {
+            const ids = Object.keys(cells).filter(id => cells[id].online === false);
+            removeMany(ids, 'wall.confirmRemoveOffline');
+        }
+        function removeDuplicates() {
+            // 同一源地址只保留一路（优先保留在线的）；其余列入待删
+            const keeper = {};   // url -> 保留的 camera_id
+            const dup = [];
+            for (const id of Object.keys(cells)) {
+                const u = cells[id].url;
+                if (!(u in keeper)) { keeper[u] = id; continue; }
+                const kept = cells[keeper[u]];
+                if (kept.online === false && cells[id].online) { dup.push(keeper[u]); keeper[u] = id; }
+                else { dup.push(id); }
+            }
+            removeMany(dup, 'wall.confirmRemoveDup');
         }
 
         applyI18n();
