@@ -929,6 +929,68 @@ async def cameras_remove(request):
     return web.json_response({"status": "removed", "camera_id": camera_id})
 
 
+async def ws_video_handler(request):
+    """
+    Multiplexed video over a single WebSocket (Phase 6) — bypasses the browser's
+    ~6-connections-per-origin limit that one-MJPEG-per-cell hits.
+
+    Client → server (text JSON):
+      {"type":"subscribe","camera_ids":[...]}   replace the subscription set
+      {"type":"add","camera_ids":[...]}         add to it
+      {"type":"remove","camera_ids":[...]}      remove from it
+    Server → client (binary frame, only for subscribed cameras whose frame advanced):
+      [2-byte big-endian header length N][N-byte camera_id utf-8][JPEG bytes]
+    """
+    ws = web.WebSocketResponse(heartbeat=30)
+    await ws.prepare(request)
+    subscribed = set()
+    last_sent = {}  # camera_id -> last frame_id pushed
+
+    async def push_loop():
+        try:
+            while not ws.closed:
+                for cid in list(subscribed):
+                    cam = camera_manager.get(cid)
+                    if cam is None or cam.latest_jpeg is None:
+                        continue
+                    if last_sent.get(cid) == cam.frame_id:
+                        continue
+                    last_sent[cid] = cam.frame_id
+                    cid_b = cid.encode("utf-8")
+                    header = len(cid_b).to_bytes(2, "big") + cid_b
+                    await ws.send_bytes(header + cam.latest_jpeg)
+                await asyncio.sleep(0.02)  # ~50 Hz poll; sends only when a frame is new
+        except (asyncio.CancelledError, ConnectionResetError):
+            pass
+        except Exception as e:
+            logger.debug(f"ws/video push error: {e}")
+
+    push_task = asyncio.create_task(push_loop())
+    try:
+        async for msg in ws:
+            if msg.type != web.WSMsgType.TEXT:
+                continue
+            try:
+                data = json.loads(msg.data)
+            except (ValueError, TypeError):
+                continue
+            kind = data.get("type")
+            ids = data.get("camera_ids", []) or []
+            if kind == "subscribe":
+                subscribed.clear()
+                subscribed.update(ids)
+                last_sent.clear()
+            elif kind == "add":
+                subscribed.update(ids)
+            elif kind == "remove":
+                for c in ids:
+                    subscribed.discard(c)
+                    last_sent.pop(c, None)
+    finally:
+        push_task.cancel()
+    return ws
+
+
 async def rtsp_stop(request):
     """
     Stop RTSP stream processing.
@@ -1096,6 +1158,7 @@ async def create_app(test_mode=False):
     app.router.add_get("/models", models)
     app.router.add_get("/detect-services", detect_services)
     app.router.add_get("/ws", websocket_handler)
+    app.router.add_get("/ws/video", ws_video_handler)  # multiplexed video (Phase 6)
 
     # MJPEG video return path (Phase 1: replaces the WebRTC video return)
     app.router.add_get("/stream", mjpeg_stream)

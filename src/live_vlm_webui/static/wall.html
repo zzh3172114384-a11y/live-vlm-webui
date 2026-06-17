@@ -347,16 +347,50 @@ limitations under the License.
             }
         }, { rootMargin: '120px' });
 
-        // 是否拉流 = 在线 && 可见。离线/离屏都释放 /stream 连接（省浏览器每域名 ~6 连接的名额）。
+        // ── 视频走单条 WS 多路复用：整页只占 1 条连接，绕开浏览器每域名 ~6 连接上限 ──
+        let videoWS = null;
+        const objUrls = {};   // camera_id -> 当前帧的 object URL（用完即回收，避免泄漏）
+
+        function wantedCameraIds() {
+            // 只订阅"在线 && 可见"的格子
+            return Object.keys(cells).filter(id => cells[id].online !== false && !cells[id].paused);
+        }
+        function resubscribe() {
+            if (videoWS && videoWS.readyState === WebSocket.OPEN) {
+                videoWS.send(JSON.stringify({ type: 'subscribe', camera_ids: wantedCameraIds() }));
+            }
+        }
+        function connectVideoWS() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            videoWS = new WebSocket(`${proto}://${location.host}/ws/video`);
+            videoWS.binaryType = 'arraybuffer';
+            videoWS.onopen = resubscribe;
+            videoWS.onmessage = (ev) => {
+                if (typeof ev.data === 'string') return;       // 帧只走二进制
+                const buf = ev.data;
+                const hlen = new DataView(buf).getUint16(0);   // [2字节头长][camera_id][jpeg]
+                const cid = new TextDecoder().decode(new Uint8Array(buf, 2, hlen));
+                const cell = cells[cid];
+                if (!cell) return;
+                const blob = new Blob([new Uint8Array(buf, 2 + hlen)], { type: 'image/jpeg' });
+                const url = URL.createObjectURL(blob);
+                if (objUrls[cid]) URL.revokeObjectURL(objUrls[cid]);
+                objUrls[cid] = url;
+                cell.img.src = url;
+            };
+            videoWS.onclose = () => { videoWS = null; setTimeout(connectVideoWS, 2000); };
+            videoWS.onerror = () => { try { videoWS.close(); } catch (e) {} };
+        }
+
+        // 是否取流 = 在线 && 可见。视频帧由 videoWS 推送；这里只管框轮询 + 离线/离屏的清理。
+        // （订阅集的更新由 resubscribe() 在 loadCameras/暂停/恢复 时统一发送，避免逐格刷屏。）
         function refreshStream(cell, id) {
             const on = cell.online !== false && !cell.paused;
             if (on) {
-                if (!cell.img.getAttribute('src')) {
-                    cell.img.src = '/stream?camera_id=' + encodeURIComponent(id);
-                    startBoxPoll(cell);
-                }
+                startBoxPoll(cell);
             } else {
                 if (cell.boxTimer) { clearInterval(cell.boxTimer); cell.boxTimer = null; }
+                if (objUrls[id]) { URL.revokeObjectURL(objUrls[id]); delete objUrls[id]; }
                 cell.img.removeAttribute('src');
             }
         }
@@ -366,12 +400,14 @@ limitations under the License.
             cell.el.classList.add('paused');
             cell.wrap.dataset.msg = t('wall.pausedOverlay');
             refreshStream(cell, cell.el.dataset.cameraId);
+            resubscribe();
         }
         function resumeCell(cell, id) {
             if (!cell.paused) return;
             cell.paused = false;
             cell.el.classList.remove('paused');
             refreshStream(cell, id);
+            resubscribe();
         }
 
         function createCell(cam) {
@@ -434,6 +470,7 @@ limitations under the License.
             for (const cam of list) { if (!cells[cam.camera_id]) createCell(cam); updateBadge(cam); }
             document.getElementById('emptyMsg').style.display = list.length ? 'none' : 'block';
             updateSummary(list.length);
+            resubscribe();   // 统一同步视频订阅集（新增/移除/状态变化后）
         }
 
         function destroyCell(id) {
@@ -441,6 +478,7 @@ limitations under the License.
             if (!cell) return;
             if (cell.boxTimer) clearInterval(cell.boxTimer);
             cellObserver.unobserve(cell.el);
+            if (objUrls[id]) { URL.revokeObjectURL(objUrls[id]); delete objUrls[id]; }
             cell.img.src = '';
             cell.el.remove();
             delete cells[id];
@@ -505,6 +543,7 @@ limitations under the License.
         applyI18n();
         resolveAndApplyTheme();
         connectWS();
+        connectVideoWS();
         loadCameras();
         setInterval(loadCameras, 3000);
     </script>
